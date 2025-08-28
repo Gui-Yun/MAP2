@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:cebra.ai)",
+      "WebSearch"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

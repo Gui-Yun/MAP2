@@ -30,7 +30,7 @@ class Config:
     """统一参数配置类"""
     
     # 数据路径
-    DATA_PATH = r'F:\brain\Micedata\M65_0816'
+    DATA_PATH = r'F:\brain\Micedata\M74_0816'
     
     # 触发文件处理参数
     IPD = 5                    # 刺激呈现时长(s)
@@ -41,7 +41,7 @@ class Config:
     PRE_FRAMES = 10           # 刺激前帧数（基线期）
     POST_FRAMES = 40          # 刺激后帧数（响应期）
     STIMULUS_DURATION = 20    # 刺激持续时间（帧数）
-    BASELINE_CORRECT = False  # 是否进行基线校正
+    BASELINE_CORRECT = True  # 是否进行基线校正
     
     # 标签重分类参数
     NOISE_INTENSITY = 1       # 噪音刺激强度标识
@@ -49,14 +49,14 @@ class Config:
     # RR神经元筛选参数
     T_STIMULUS = PRE_FRAMES   # 刺激开始时间点
     L_STIMULUS = STIMULUS_DURATION  # 刺激窗口长度
-    ALPHA_FDR = 0.005        # FDR校正阈值
+    ALPHA_FDR = 0.05        # FDR校正阈值
     ALPHA_LEVEL = 0.05       # 显著性水平
     RELIABILITY_THRESHOLD = 0.5  # 可靠性阈值
     
     # 快速RR筛选参数
     EFFECT_SIZE_THRESHOLD = 0.5   # 效应大小阈值
     SNR_THRESHOLD = 1.0          # 信噪比阈值
-    RESPONSE_RATIO_THRESHOLD = 0.45  # 响应比例阈值
+    RESPONSE_RATIO_THRESHOLD = 0.4  # 响应比例阈值
     
     # 分类参数
     TEST_SIZE = 0.3           # 测试集比例
@@ -79,9 +79,9 @@ class Config:
     NEURON_THRESHOLD = 1000   # 使用原始RR方法的神经元数量阈值
     
     # 试验范围（用于去掉首尾）
-    TRIAL_START_SKIP = 0     # 跳过开头的试验数
+    TRIAL_START_SKIP = 1     # 跳过开头的试验数
     TRIAL_END_SKIP = 0      # 跳过结尾的试验数
-    TOTAL_TRIALS = 176      # 保持的试验总数
+    TOTAL_TRIALS = 180      # 保持的试验总数
     
     # 预处理参数
     ENABLE_PREPROCESSING = True      # 是否启用预处理
@@ -297,8 +297,8 @@ def load_data(data_path, start_idx=cfg.TRIAL_START_SKIP, end_idx=cfg.TRIAL_START
     
     # 保持指定试验数，去掉首尾 - 对触发数据和刺激数据同时处理
     start_edges = trigger_data['start_edge'][start_idx:end_idx]
-    stimulus_data = stimulus_data[start_idx:end_idx, :]
-    
+    stimulus_data = stimulus_data[0:end_idx - start_idx, :]
+
     if interactive:
         print("stimulus data loaded successfully!")
         print(f"Using trials {start_idx} to {end_idx-1}, total: {len(start_edges)} trials")
@@ -343,9 +343,12 @@ def preprocess_neural_data(segments, labels, method='comprehensive'):
         baseline_mean = np.mean(baseline_data, axis=2, keepdims=True)  # (trials, neurons, 1)
         baseline_std = np.std(baseline_data, axis=2, keepdims=True) + 1e-8
         
+        # 避免除零和NaN错误
+        baseline_mean = np.where((baseline_mean == 0) | np.isnan(baseline_mean), 1e-6, baseline_mean)
+        
         # dF/F 归一化
         stimulus_data = (stimulus_data - baseline_mean) / baseline_mean
-        stimulus_data = np.nan_to_num(stimulus_data, 0)
+        stimulus_data = np.nan_to_num(stimulus_data, nan=0.0, posinf=0.0, neginf=0.0)
     
     # 展平为特征矩阵
     X = stimulus_data.reshape(stimulus_data.shape[0], -1)  # (trials, neurons * timepoints)
@@ -565,56 +568,494 @@ if __name__ == '__main__':
 
 
     # %% 简单可视化一下原始神经信号
-    def plot_neuron_data(neuron_data, trigger_data, stimulus_data):
-        
-        plt.figure(figsize=cfg.FIGURE_SIZE_LARGE)
-        # 神经元数量太大，选择一些神经元
-        plt.plot(neuron_data.T, color='gray')
-        plt.title('Original Neuron Signals')
-        plt.xlabel('Time (frames)')
-        # 用红色虚线在trigger_data每个位置画竖直线
-        for t in trigger_data:
-            plt.axvline(x=t, color='red', linestyle='--', linewidth=1)
-        plt.ylabel('Neural Activity')
-        plt.show()
     plot_neuron_data(neuron_data[:,14858], trigger_data, stimulus_data)
+    
     # %% 将神经信号划分为trail，并标记label
-    def segment_neuron_data(neuron_data, trigger_data, stimulus_data, pre_frames=cfg.PRE_FRAMES, post_frames=cfg.POST_FRAMES, baseline_correct=cfg.BASELINE_CORRECT):
-        """
-        改进的数据分割函数
+
+# %% ========== 可视化函数 ==========
+def plot_neuron_data(neuron_data, trigger_data, stimulus_data):
+    """可视化原始神经信号"""
+    plt.figure(figsize=cfg.FIGURE_SIZE_LARGE)
+    # 神经元数量太大，选择一些神经元
+    plt.plot(neuron_data.T, color='gray')
+    plt.title('Original Neuron Signals')
+    plt.xlabel('Time (frames)')
+    # 用红色虚线在trigger_data每个位置画竖直线
+    for t in trigger_data:
+        plt.axvline(x=t, color='red', linestyle='--', linewidth=1)
+    plt.ylabel('Neural Activity')
+    plt.show()
+
+def plot_simple_neuron(neuron_idx, trials_idx, segments):
+    """绘制单个神经元所有trial的平均神经活动"""
+    plt.figure(figsize=cfg.FIGURE_SIZE_TINY)
+    # 绘制所有的trial，颜色为浅灰色
+    for trial_idx in trials_idx:
+        plt.plot(segments[trial_idx, neuron_idx, :], label=f'Trial {trial_idx}')
+    # 绘制上面所有trial的平均发放，颜色为黑色，加粗
+    plt.plot(np.mean(segments[trials_idx, neuron_idx, :], axis=0), color='black', linewidth=2, label='Mean')
+    plt.title(f'Neuron {neuron_idx} Activity')
+    plt.xlabel('Time (frames)')
+    plt.ylabel('Neural Activity')
+    plt.legend()
+    plt.show()
+
+def plot_rr_neurons_distribution(neuron_pos, rr_results):
+    """可视化RR神经元的空间分布"""
+    plt.figure(figsize=(15, 5))
+    
+    # 所有神经元位置
+    plt.subplot(1, 3, 1)
+    plt.scatter(neuron_pos[0, :], neuron_pos[1, :], c='lightgray', alpha=0.5, s=1)
+    plt.title(f'All Neurons (n={neuron_pos.shape[1]})')
+    plt.xlabel('X Coordinate')
+    plt.ylabel('Y Coordinate')
+    plt.axis('equal')
+    
+    # 响应性神经元位置
+    if len(rr_results['response_neurons']) > 0:
+        plt.subplot(1, 3, 2)
+        plt.scatter(neuron_pos[0, :], neuron_pos[1, :], c='lightgray', alpha=0.3, s=1)
+        response_idx = rr_results['response_neurons']
+        plt.scatter(neuron_pos[0, response_idx], neuron_pos[1, response_idx], 
+                   c='blue', alpha=0.7, s=3)
+        plt.title(f'Responsive Neurons (n={len(response_idx)})')
+        plt.xlabel('X Coordinate')
+        plt.ylabel('Y Coordinate')
+        plt.axis('equal')
+    
+    # RR神经元位置
+    if len(rr_results['rr_neurons']) > 0:
+        plt.subplot(1, 3, 3)
+        plt.scatter(neuron_pos[0, :], neuron_pos[1, :], c='lightgray', alpha=0.3, s=1)
+        rr_idx = rr_results['rr_neurons']
+        plt.scatter(neuron_pos[0, rr_idx], neuron_pos[1, rr_idx], 
+                   c='red', alpha=0.8, s=3)
+        plt.title(f'RR Neurons (n={len(rr_idx)})')
+        plt.xlabel('X Coordinate')
+        plt.ylabel('Y Coordinate')
+        plt.axis('equal')
+    
+    plt.tight_layout()
+    plt.show()
+
+# %% ========== 数据分割函数 ==========
+def segment_neuron_data(neuron_data, trigger_data, stimulus_data, pre_frames=cfg.PRE_FRAMES, post_frames=cfg.POST_FRAMES, baseline_correct=cfg.BASELINE_CORRECT):
+    """
+    改进的数据分割函数
+    
+    参数:
+    pre_frames: 刺激前的帧数（用于基线）
+    post_frames: 刺激后的帧数（用于反应）
+    baseline_correct: 是否进行基线校正 (ΔF/F)
+    """
+    total_frames = pre_frames + post_frames
+    segments = np.zeros((len(trigger_data), neuron_data.shape[1], total_frames))
+    labels = []
+
+    for i in range(len(trigger_data)): # 遍历每个触发事件
+        start = trigger_data[i] - pre_frames
+        end = trigger_data[i] + post_frames
         
-        参数:
-        pre_frames: 刺激前的帧数（用于基线）
-        post_frames: 刺激后的帧数（用于反应）
-        baseline_correct: 是否进行基线校正 (ΔF/F)
-        """
-        total_frames = pre_frames + post_frames
-        segments = np.zeros((len(trigger_data), neuron_data.shape[1], total_frames))
-        labels = []
+        # 边界检查
+        if start < 0 or end >= neuron_data.shape[0]:
+            print(f"警告: 第{i}个刺激的时间窗口超出边界，跳过")
+            continue
+            
+        segment = neuron_data[start:end, :]
+        
+        # 基线校正 (ΔF/F)
+        if baseline_correct:
+            baseline = np.mean(segment[:pre_frames, :], axis=0, keepdims=True)
+            # 避免除零错误和NaN
+            baseline = np.where((baseline == 0) | np.isnan(baseline), 1e-6, baseline)
+            segment = (segment - baseline) / baseline
+            # 清理可能的NaN和Inf值
+            segment = np.nan_to_num(segment, nan=0.0, posinf=0.0, neginf=0.0)
+        
+        segments[i] = segment.T
+        labels.append(stimulus_data[i, 0])
+        
+    return segments, labels
 
-        for i in range(len(trigger_data)): # 遍历每个触发事件
-            start = trigger_data[i] - pre_frames
-            end = trigger_data[i] + post_frames
-            
-            # 边界检查
-            if start < 0 or end >= neuron_data.shape[0]:
-                print(f"警告: 第{i}个刺激的时间窗口超出边界，跳过")
-                continue
-                
-            segment = neuron_data[start:end, :]
-            
-            # 基线校正 (ΔF/F)
-            if baseline_correct:
-                baseline = np.mean(segment[:pre_frames, :], axis=0, keepdims=True)
-                # 避免除零错误
-                baseline = np.where(baseline == 0, 1e-6, baseline)
-                segment = (segment - baseline) / baseline
-            
-            segments[i] = segment.T
-            labels.append(stimulus_data[i, 0])
-            
-        return segments, labels
+# %% ========== 标签处理函数 ==========
+def reclassify_labels(stimulus_data):
+    """重新分类标签：类别1和2强度为1的作为第3类"""
+    new_labels = []
+    for i in range(len(stimulus_data)):  
+        category = stimulus_data[i, 0]  
+        intensity = stimulus_data[i, 1]  
+        
+        if intensity == cfg.NOISE_INTENSITY:
+            new_labels.append(3)  # 强度为1的噪音刺激作为第3类
+        elif category == 1 and intensity == 0:
+            new_labels.append(1)  # 类别1且强度不为1
+        elif category == 2 and intensity == 0:
+            new_labels.append(2)  # 类别2且强度不为1
+        else:
+            new_labels.append(0)  # 其他情况标记为0（会被过滤）
+    
+    return np.array(new_labels)
 
+# %% ========== RR神经元筛选函数 ==========
+def fast_rr_selection(trials, labels, t_stimulus=cfg.T_STIMULUS, l=cfg.L_STIMULUS, 
+                     alpha_fdr=cfg.ALPHA_FDR, alpha_level=cfg.ALPHA_LEVEL, 
+                     reliability_threshold=cfg.RELIABILITY_THRESHOLD):
+    """
+    快速RR神经元筛选
+    优化策略:
+    1. 向量化计算替代循环
+    2. 简化统计检验（t检验替代Mann-Whitney U）
+    3. 批量处理所有神经元
+    """
+    import time
+    start_time = time.time()
+    
+    print("使用快速RR筛选算法...")
+    
+    # 过滤有效数据
+    valid_mask = (labels == 1) | (labels == 2)
+    valid_trials = trials[valid_mask]
+    valid_labels = labels[valid_mask]
+    
+    n_trials, n_neurons, n_timepoints = valid_trials.shape
+    
+    # 定义时间窗口
+    baseline_pre = np.arange(0, t_stimulus)
+    baseline_post = np.arange(t_stimulus + l, n_timepoints)
+    stimulus_window = np.arange(t_stimulus, t_stimulus + l)
+    
+    print(f"处理 {n_trials} 个试次, {n_neurons} 个神经元")
+    
+    # 1. 响应性检测 - 向量化计算
+    # 计算基线和刺激期的平均值
+    baseline_pre_mean = np.mean(valid_trials[:, :, baseline_pre], axis=2)  # (trials, neurons)
+    baseline_post_mean = np.mean(valid_trials[:, :, baseline_post], axis=2)  # (trials, neurons)
+    # 合并前后基线的平均
+    baseline_mean = (baseline_pre_mean + baseline_post_mean) / 2
+    
+    stimulus_mean = np.mean(valid_trials[:, :, stimulus_window], axis=2)  # (trials, neurons)
+    
+    # 简化的响应性检测：基于效应大小和标准误差
+    baseline_pre_std = np.std(valid_trials[:, :, baseline_pre], axis=2)  # (trials, neurons)
+    baseline_post_std = np.std(valid_trials[:, :, baseline_post], axis=2)  # (trials, neurons)
+    # 合并前后基线的标准差
+    baseline_std = (baseline_pre_std + baseline_post_std) / 2
+    
+    stimulus_std = np.std(valid_trials[:, :, stimulus_window], axis=2)
+    
+    # Cohen's d效应大小
+    pooled_std = np.sqrt((baseline_std**2 + stimulus_std**2) / 2)
+    effect_size = np.abs(stimulus_mean - baseline_mean) / (pooled_std + 1e-8)
+    
+    # 响应性标准：平均效应大小 > 阈值 且 至少指定比例试次有响应
+    response_ratio = np.mean(effect_size > cfg.EFFECT_SIZE_THRESHOLD, axis=0)
+    enhanced_neurons = np.where((response_ratio > cfg.RESPONSE_RATIO_THRESHOLD) & 
+                              (np.mean(stimulus_mean > baseline_mean, axis=0) > cfg.RESPONSE_RATIO_THRESHOLD))[0].tolist()
+    
+    # 2. 可靠性检测 - 简化版本
+    # 计算每个神经元在每个试次的信噪比
+    signal_strength = np.abs(stimulus_mean - baseline_mean)
+    noise_level = baseline_std + 1e-8
+    snr = signal_strength / noise_level
+    
+    # 可靠性：指定比例的试次信噪比 > 阈值
+    reliability_ratio = np.mean(snr > cfg.SNR_THRESHOLD, axis=0)
+    reliable_neurons = np.where(reliability_ratio >= reliability_threshold)[0].tolist()
+    
+    # 3. 最终RR神经元
+    rr_neurons = list(set(enhanced_neurons) & set(reliable_neurons))
+    
+    elapsed_time = time.time() - start_time
+    print(f"快速RR筛选完成，耗时: {elapsed_time:.2f}秒")
+    
+    return {
+        'rr_neurons': rr_neurons,
+        'response_neurons': enhanced_neurons,
+        'reliable_neurons': reliable_neurons,
+        'enhanced_neurons_union': enhanced_neurons,
+        'suppressed_neurons_union': [],  # 简化版本不区分抑制
+        'processing_time': elapsed_time
+    }
+
+# %% ========== 时间点分析函数 ==========
+def classify_by_timepoints(segments, labels, rr_neurons, pre_frames=cfg.PRE_FRAMES, 
+                          post_frames=cfg.POST_FRAMES, window_size=1, step_size=1):
+    """
+    分析trial中每个时间点的分类准确率
+    
+    参数:
+    segments: 神经数据片段 (trials, neurons, timepoints)
+    labels: 标签数组
+    rr_neurons: RR神经元索引
+    pre_frames: 刺激前帧数
+    post_frames: 刺激后帧数
+    window_size: 未使用（保持接口兼容）
+    step_size: 未使用（保持接口兼容）
+    
+    返回:
+    time_accuracies: 每个时间点的准确率
+    time_points: 时间点数组
+    """
+    from sklearn.svm import SVC
+    from sklearn.model_selection import cross_val_score, StratifiedKFold
+    from sklearn.preprocessing import RobustScaler
+    from sklearn.utils.class_weight import compute_class_weight
+    
+    # 过滤有效数据和RR神经元
+    valid_mask = labels != 0
+    valid_segments = segments[valid_mask][:, rr_neurons, :]
+    valid_labels = labels[valid_mask]
+    
+    n_trials, n_neurons, n_timepoints = valid_segments.shape
+    print(f"时间点分类分析: {n_trials}个试次, {n_neurons}个神经元, {n_timepoints}个时间点")
+    
+    time_points = []
+    accuracies = []
+    
+    # 逐个时间点分析
+    for t in range(n_timepoints):
+        # 提取单个时间点的数据
+        timepoint_data = valid_segments[:, :, t]  # (trials, neurons)
+        
+        # 检查数据方差，跳过无变化的时间点
+        if np.var(timepoint_data) < 1e-10:
+            time_points.append(t)
+            accuracies.append(1.0 / len(np.unique(valid_labels)))  # 随机水平
+            continue
+        
+        # 使用RobustScaler进行标准化（更适合神经数据）
+        scaler = RobustScaler()
+        X_scaled = scaler.fit_transform(timepoint_data)
+        
+        # 使用与主分类相同的SVM参数
+        clf = SVC(kernel=cfg.SVM_KERNEL, C=cfg.SVM_C, gamma=cfg.SVM_GAMMA,
+                 random_state=cfg.RANDOM_STATE, class_weight='balanced')
+        
+        # 交叉验证
+        cv = StratifiedKFold(n_splits=cfg.CV_FOLDS, 
+                            shuffle=True, random_state=cfg.RANDOM_STATE)
+        
+        try:
+            scores = cross_val_score(clf, X_scaled, valid_labels, cv=cv, scoring='accuracy')
+            accuracy = scores.mean()
+        except Exception as e:
+            print(f"时间点 {t} 分类失败: {e}")
+            accuracy = 1.0 / len(np.unique(valid_labels))  # 随机水平
+        
+        time_points.append(t)
+        accuracies.append(accuracy)
+        
+        if t % 5 == 0:  # 每5个时间点打印一次进度
+            print(f"时间点 {t}: 准确率 {accuracy:.3f}")
+    
+    return np.array(accuracies), np.array(time_points)
+
+def plot_accuracy_over_time(accuracies, time_points, pre_frames=cfg.PRE_FRAMES, 
+                           stimulus_duration=cfg.STIMULUS_DURATION):
+    """
+    绘制准确率随时间变化的曲线
+    
+    参数:
+    accuracies: 准确率数组
+    time_points: 时间点数组
+    pre_frames: 刺激前帧数
+    stimulus_duration: 刺激持续时间
+    """
+    plt.figure(figsize=cfg.FIGURE_SIZE_MEDIUM)
+    
+    # 绘制准确率曲线
+    plt.plot(time_points, accuracies, 'b-', linewidth=2, label='Classification Accuracy')
+    
+    # 添加刺激期标识
+    stimulus_start = pre_frames
+    stimulus_end = pre_frames + stimulus_duration
+    
+    # 标记刺激开始和结束
+    plt.axvline(x=stimulus_start, color='red', linestyle='--', alpha=0.7, label='Stimulus Start')
+    plt.axvline(x=stimulus_end, color='red', linestyle=':', alpha=0.7, label='Stimulus End')
+    
+    # 添加刺激期背景
+    plt.axvspan(stimulus_start, stimulus_end, alpha=0.2, color='red', label='Stimulus Period')
+    
+    # 添加基线参考线
+    baseline_acc = 1.0 / len(np.unique([1, 2, 3]))  # 假设3类分类的随机准确率
+    plt.axhline(y=baseline_acc, color='gray', linestyle='-', alpha=0.5, label=f'Chance Level ({baseline_acc:.3f})')
+    
+    # 设置图形属性
+    plt.xlabel('Time Point (frames)')
+    plt.ylabel('Classification Accuracy')
+    plt.title('Classification Accuracy Over Time Within Trials')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    
+    # 添加时间轴标签
+    plt.xticks(np.arange(0, max(time_points)+1, 10))
+    
+    # 显示最高准确率点
+    max_acc_idx = np.argmax(accuracies)
+    max_time = time_points[max_acc_idx]
+    max_acc = accuracies[max_acc_idx]
+    
+    plt.plot(max_time, max_acc, 'ro', markersize=8)
+    plt.annotate(f'Peak: {max_acc:.3f}@t={max_time}', 
+                xy=(max_time, max_acc), xytext=(max_time+5, max_acc+0.02),
+                arrowprops=dict(arrowstyle='->', color='red', alpha=0.7))
+    
+    plt.tight_layout()
+    plt.show()
+    
+    # 打印关键统计信息
+    print(f"\n=== 时间点分类分析结果 ===")
+    print(f"基线期平均准确率: {np.mean(accuracies[:pre_frames]):.3f}")
+    print(f"刺激期平均准确率: {np.mean(accuracies[stimulus_start:stimulus_end]):.3f}")
+    print(f"响应期平均准确率: {np.mean(accuracies[stimulus_end:]):.3f}")
+    print(f"最高准确率: {max_acc:.3f} (时间点 {max_time})")
+    print(f"整体平均准确率: {np.mean(accuracies):.3f} ± {np.std(accuracies):.3f}")
+
+# %% ========== Fisher信息分析函数 ==========
+def calculate_fisher_information(segments, labels, rr_neurons):
+    """
+    计算每个时间点的Fisher信息，用于衡量类别可分离性
+    
+    参数:
+    segments: 神经数据片段 (trials, neurons, timepoints)
+    labels: 标签数组
+    rr_neurons: RR神经元索引
+    
+    返回:
+    fisher_scores: 每个时间点的Fisher信息分数
+    """
+    from scipy.stats import f_oneway
+    
+    # 过滤有效数据和RR神经元
+    valid_mask = labels != 0
+    valid_segments = segments[valid_mask][:, rr_neurons, :]
+    valid_labels = labels[valid_mask]
+    
+    n_trials, n_neurons, n_timepoints = valid_segments.shape
+    print(f"Fisher信息计算: {n_trials}个试次, {n_neurons}个神经元, {n_timepoints}个时间点")
+    
+    fisher_scores = []
+    unique_labels = np.unique(valid_labels)
+    
+    for t in range(n_timepoints):
+        # 提取单个时间点的数据
+        timepoint_data = valid_segments[:, :, t]  # (trials, neurons)
+        
+        # 计算类间和类内方差
+        class_means = []
+        class_vars = []
+        class_data = []
+        
+        for label in unique_labels:
+            label_mask = valid_labels == label
+            label_data = timepoint_data[label_mask]  # (trials_for_this_label, neurons)
+            
+            if len(label_data) > 0:
+                class_data.append(label_data)
+                class_means.append(np.mean(label_data, axis=0))  # 每个神经元的均值
+                class_vars.append(np.var(label_data, axis=0))    # 每个神经元的方差
+        
+        if len(class_means) < 2:
+            fisher_scores.append(0.0)
+            continue
+            
+        class_means = np.array(class_means)  # (n_classes, n_neurons)
+        class_vars = np.array(class_vars)    # (n_classes, n_neurons)
+        
+        # 计算Fisher比率：类间方差 / 类内方差
+        # 类间方差：不同类别均值之间的方差
+        between_class_var = np.var(class_means, axis=0)  # (n_neurons,)
+        
+        # 类内方差：各类别内部方差的平均
+        within_class_var = np.mean(class_vars, axis=0)   # (n_neurons,)
+        
+        # 避免除零错误
+        within_class_var = np.maximum(within_class_var, 1e-10)
+        
+        # Fisher比率
+        fisher_ratio = between_class_var / within_class_var  # (n_neurons,)
+        
+        # 对所有神经元求平均作为该时间点的Fisher分数
+        fisher_score = np.mean(fisher_ratio)
+        fisher_scores.append(fisher_score)
+        
+        if t % 10 == 0:  # 每10个时间点打印一次进度
+            print(f"时间点 {t}: Fisher信息 {fisher_score:.3f}")
+    
+    return np.array(fisher_scores)
+
+def plot_fisher_information(fisher_scores, time_points, pre_frames=cfg.PRE_FRAMES, 
+                           stimulus_duration=cfg.STIMULUS_DURATION):
+    """
+    绘制Fisher信息随时间变化的曲线
+    
+    参数:
+    fisher_scores: Fisher信息分数数组
+    time_points: 时间点数组
+    pre_frames: 刺激前帧数
+    stimulus_duration: 刺激持续时间
+    """
+    plt.figure(figsize=cfg.FIGURE_SIZE_MEDIUM)
+    
+    # 绘制Fisher信息曲线
+    plt.plot(time_points, fisher_scores, 'g-', linewidth=2, label='Fisher Information')
+    
+    # 添加刺激期标识
+    stimulus_start = pre_frames
+    stimulus_end = pre_frames + stimulus_duration
+    
+    # 标记刺激开始和结束
+    plt.axvline(x=stimulus_start, color='red', linestyle='--', alpha=0.7, label='Stimulus Start')
+    plt.axvline(x=stimulus_end, color='red', linestyle=':', alpha=0.7, label='Stimulus End')
+    
+    # 添加刺激期背景
+    plt.axvspan(stimulus_start, stimulus_end, alpha=0.2, color='red', label='Stimulus Period')
+    
+    # 设置图形属性
+    plt.xlabel('Time Point (frames)')
+    plt.ylabel('Fisher Information')
+    plt.title('Fisher Information Over Time Within Trials')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    
+    # 添加时间轴标签
+    plt.xticks(np.arange(0, max(time_points)+1, 10))
+    
+    # 显示最高Fisher信息点
+    max_fisher_idx = np.argmax(fisher_scores)
+    max_time = time_points[max_fisher_idx]
+    max_fisher = fisher_scores[max_fisher_idx]
+    
+    plt.plot(max_time, max_fisher, 'ro', markersize=8)
+    plt.annotate(f'Peak: {max_fisher:.3f}@t={max_time}', 
+                xy=(max_time, max_fisher), xytext=(max_time+5, max_fisher+max_fisher*0.1),
+                arrowprops=dict(arrowstyle='->', color='red', alpha=0.7))
+    
+    plt.tight_layout()
+    plt.show()
+    
+    # 打印关键统计信息
+    print(f"\n=== Fisher信息分析结果 ===")
+    print(f"基线期平均Fisher信息: {np.mean(fisher_scores[:pre_frames]):.3f}")
+    print(f"刺激期平均Fisher信息: {np.mean(fisher_scores[stimulus_start:stimulus_end]):.3f}")
+    print(f"响应期平均Fisher信息: {np.mean(fisher_scores[stimulus_end:]):.3f}")
+    print(f"最高Fisher信息: {max_fisher:.3f} (时间点 {max_time})")
+    print(f"整体平均Fisher信息: {np.mean(fisher_scores):.3f} ± {np.std(fisher_scores):.3f}")
+
+
+# %% ========== 主脚本 ==========
+if __name__ == '__main__':
+    print("start neuron data processing!") 
+    
+    # %% 加载数据
+    neuron_data, neuron_pos, trigger_data, stimulus_data = load_data(cfg.DATA_PATH)
+    
+    # %% 简单可视化一下原始神经信号
+    plot_neuron_data(neuron_data[:,14858], trigger_data, stimulus_data)
+    
+    # %% 将神经信号划分为trail，并标记label
     # 在分割前先检查原始神经数据的维度
     print(f"\n=== 原始数据维度检查 ===")
     print(f"neuron_data形状: {neuron_data.shape}")
@@ -624,40 +1065,9 @@ if __name__ == '__main__':
     
     # %% 验证标签对齐
     # 简单绘制一下单个神经元所有trail的平均神经活动
-    def plot_simple_neuron(neuron_idx, trials_idx, segments):
-        plt.figure(figsize=cfg.FIGURE_SIZE_TINY)
-        # 绘制所有的trial，颜色为浅灰色
-        for trial_idx in trials_idx:
-            plt.plot(segments[trial_idx, neuron_idx, :], label=f'Trial {trial_idx}')
-        # 绘制上面所有trial的平均发放，颜色为黑色，加粗
-        plt.plot(np.mean(segments[trials_idx, neuron_idx, :], axis=0), color='black', linewidth=2, label='Mean')
-        plt.title(f'Neuron {neuron_idx} Activity')
-        plt.xlabel('Time (frames)')
-        plt.ylabel('Neural Activity')
-        plt.legend()
-        plt.show()
-
     plot_simple_neuron(14858, [10, 20, 30], segments)
-    # 重新分类标签：类别1和2强度为1的作为第3类
-    def reclassify_labels(stimulus_data):
-        new_labels = []
-        for i in range(len(stimulus_data)):  
-            category = stimulus_data[i, 0]  
-            intensity = stimulus_data[i, 1]  
-            
-            if intensity == cfg.NOISE_INTENSITY:
-                new_labels.append(3)  # 强度为1的噪音刺激作为第3类
-            # elif category == 1 and intensity != cfg.NOISE_INTENSITY:
-            elif category == 1 and intensity == 0:
-                new_labels.append(1)  # 类别1且强度不为1
-            # elif category == 2 and intensity != cfg.NOISE_INTENSITY:
-            elif category == 2 and intensity == 0:
-                new_labels.append(2)  # 类别2且强度不为1
-            else:
-                new_labels.append(0)  # 其他情况标记为0（会被过滤）
-        
-        return np.array(new_labels)
     
+    # 重新分类标签：类别1和2强度为1的作为第3类
     new_labels = reclassify_labels(stimulus_data)
     print(f"标签分布: {np.unique(new_labels, return_counts=True)}")
     
@@ -666,90 +1076,8 @@ if __name__ == '__main__':
     # 导入RR神经元筛选模块
     from rr_neuron_selection import RRNeuronSelector
     # 准备数据进行RR神经元筛选
-    # 将segments转换为RR筛选所需的格式: (trials, neurons, timepoints)
-    # trials_for_rr = np.transpose(segments, (0, 2, 1))  # 从(trials, timepoints, neurons)转为(trials, neurons, timepoints)
     trials_for_rr = segments
     labels_for_rr = new_labels
-    # 快速RR神经元筛选函数
-    def fast_rr_selection(trials, labels, t_stimulus=cfg.T_STIMULUS, l=cfg.L_STIMULUS, 
-                         alpha_fdr=cfg.ALPHA_FDR, alpha_level=cfg.ALPHA_LEVEL, 
-                         reliability_threshold=cfg.RELIABILITY_THRESHOLD):
-        """
-        快速RR神经元筛选
-        优化策略:
-        1. 向量化计算替代循环
-        2. 简化统计检验（t检验替代Mann-Whitney U）
-        3. 批量处理所有神经元
-        """
-        import time
-        start_time = time.time()
-        
-        print("使用快速RR筛选算法...")
-        
-        # 过滤有效数据
-        valid_mask = (labels == 1) | (labels == 2)
-        valid_trials = trials[valid_mask]
-        valid_labels = labels[valid_mask]
-        
-        n_trials, n_neurons, n_timepoints = valid_trials.shape
-        
-        # 定义时间窗口
-        baseline_pre = np.arange(0, t_stimulus)
-        baseline_post = np.arange(t_stimulus + l, n_timepoints)
-        stimulus_window = np.arange(t_stimulus, t_stimulus + l)
-        
-        print(f"处理 {n_trials} 个试次, {n_neurons} 个神经元")
-        
-        # 1. 响应性检测 - 向量化计算
-        # 计算基线和刺激期的平均值
-        baseline_pre_mean = np.mean(valid_trials[:, :, baseline_pre], axis=2)  # (trials, neurons)
-        baseline_post_mean = np.mean(valid_trials[:, :, baseline_post], axis=2)  # (trials, neurons)
-        # 合并前后基线的平均
-        baseline_mean = (baseline_pre_mean + baseline_post_mean) / 2
-        
-        stimulus_mean = np.mean(valid_trials[:, :, stimulus_window], axis=2)  # (trials, neurons)
-        
-        # 简化的响应性检测：基于效应大小和标准误差
-        baseline_pre_std = np.std(valid_trials[:, :, baseline_pre], axis=2)  # (trials, neurons)
-        baseline_post_std = np.std(valid_trials[:, :, baseline_post], axis=2)  # (trials, neurons)
-        # 合并前后基线的标准差
-        baseline_std = (baseline_pre_std + baseline_post_std) / 2
-        
-        stimulus_std = np.std(valid_trials[:, :, stimulus_window], axis=2)
-        
-        # Cohen's d效应大小
-        pooled_std = np.sqrt((baseline_std**2 + stimulus_std**2) / 2)
-        effect_size = np.abs(stimulus_mean - baseline_mean) / (pooled_std + 1e-8)
-        
-        # 响应性标准：平均效应大小 > 阈值 且 至少指定比例试次有响应
-        response_ratio = np.mean(effect_size > cfg.EFFECT_SIZE_THRESHOLD, axis=0)
-        enhanced_neurons = np.where((response_ratio > cfg.RESPONSE_RATIO_THRESHOLD) & 
-                                  (np.mean(stimulus_mean > baseline_mean, axis=0) > cfg.RESPONSE_RATIO_THRESHOLD))[0].tolist()
-        
-        # 2. 可靠性检测 - 简化版本
-        # 计算每个神经元在每个试次的信噪比
-        signal_strength = np.abs(stimulus_mean - baseline_mean)
-        noise_level = baseline_std + 1e-8
-        snr = signal_strength / noise_level
-        
-        # 可靠性：指定比例的试次信噪比 > 阈值
-        reliability_ratio = np.mean(snr > cfg.SNR_THRESHOLD, axis=0)
-        reliable_neurons = np.where(reliability_ratio >= reliability_threshold)[0].tolist()
-        
-        # 3. 最终RR神经元
-        rr_neurons = list(set(enhanced_neurons) & set(reliable_neurons))
-        
-        elapsed_time = time.time() - start_time
-        print(f"快速RR筛选完成，耗时: {elapsed_time:.2f}秒")
-        
-        return {
-            'rr_neurons': rr_neurons,
-            'response_neurons': enhanced_neurons,
-            'reliable_neurons': reliable_neurons,
-            'enhanced_neurons_union': enhanced_neurons,
-            'suppressed_neurons_union': [],  # 简化版本不区分抑制
-            'processing_time': elapsed_time
-        }
     
     # 性能对比：使用原始方法和快速方法
     print("\n=== 性能对比测试 ===")
@@ -820,46 +1148,6 @@ if __name__ == '__main__':
     })
     
     print(f"RR神经元结果已保存到: {rr_save_path}")
-    
-    # 可选：可视化RR神经元的空间分布
-    def plot_rr_neurons_distribution(neuron_pos, rr_results):
-        """可视化RR神经元的空间分布"""
-        plt.figure(figsize=(15, 5))
-        
-        # 所有神经元位置
-        plt.subplot(1, 3, 1)
-        plt.scatter(neuron_pos[0, :], neuron_pos[1, :], c='lightgray', alpha=0.5, s=1)
-        plt.title(f'All Neurons (n={neuron_pos.shape[1]})')
-        plt.xlabel('X Coordinate')
-        plt.ylabel('Y Coordinate')
-        plt.axis('equal')
-        
-        # 响应性神经元位置
-        if len(rr_results['response_neurons']) > 0:
-            plt.subplot(1, 3, 2)
-            plt.scatter(neuron_pos[0, :], neuron_pos[1, :], c='lightgray', alpha=0.3, s=1)
-            response_idx = rr_results['response_neurons']
-            plt.scatter(neuron_pos[0, response_idx], neuron_pos[1, response_idx], 
-                       c='blue', alpha=0.7, s=3)
-            plt.title(f'Responsive Neurons (n={len(response_idx)})')
-            plt.xlabel('X Coordinate')
-            plt.ylabel('Y Coordinate')
-            plt.axis('equal')
-        
-        # RR神经元位置
-        if len(rr_results['rr_neurons']) > 0:
-            plt.subplot(1, 3, 3)
-            plt.scatter(neuron_pos[0, :], neuron_pos[1, :], c='lightgray', alpha=0.3, s=1)
-            rr_idx = rr_results['rr_neurons']
-            plt.scatter(neuron_pos[0, rr_idx], neuron_pos[1, rr_idx], 
-                       c='red', alpha=0.8, s=3)
-            plt.title(f'RR Neurons (n={len(rr_idx)})')
-            plt.xlabel('X Coordinate')
-            plt.ylabel('Y Coordinate')
-            plt.axis('equal')
-        
-        plt.tight_layout()
-        plt.show()
     
     # 绘制神经元空间分布图
     if neuron_pos.shape[1] > 0:
@@ -935,5 +1223,21 @@ if __name__ == '__main__':
         else:
             print("预处理功能已禁用，仅使用原始方法")
     
+    # %% 按时间点分类分析
+    if len(rr_results['rr_neurons']) > 0:
+        print("\n=== 按时间点分类分析 ===")
+        
+        # 执行时间点分类分析
+        time_accuracies, time_points = classify_by_timepoints(
+            segments, new_labels, rr_results['rr_neurons'])
+        
+        # 绘制结果
+        plot_accuracy_over_time(time_accuracies, time_points)
+        
+        # 计算Fisher信息
+        print("\n=== Fisher信息分析 ===")
+        fisher_scores = calculate_fisher_information(segments, new_labels, rr_results['rr_neurons'])
+        plot_fisher_information(fisher_scores, np.arange(len(fisher_scores)))
+
 
 # %%

@@ -7,11 +7,6 @@ import numpy as np
 import scipy.io
 import pandas as pd
 import matplotlib.pyplot as plt
-from sklearn.svm import SVC
-from sklearn.model_selection import train_test_split, cross_val_score
-from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import classification_report, confusion_matrix
-import seaborn as sns
 # %% 处理触发文件
 def process_trigger(txt_file, IPD=5, ISI=5, fre=None, min_sti_gap=5):
     """
@@ -166,11 +161,6 @@ def load_data(data_path, interactive = True):
     neuron_data = data['whole_trace_ori']
     # 转化成numpy数组
     neuron_data = np.array(neuron_data)
-    print(f"原始神经数据形状: {neuron_data.shape}")
-    
-    # 移除全局标准化，改为在基线校正中处理
-    # 只做基本的数据清理：移除NaN和Inf
-    neuron_data = np.nan_to_num(neuron_data, nan=0.0, posinf=0.0, neginf=0.0)
     neuron_pos = data['whole_center']
     # 检查neuron_pos维度
     if len(neuron_pos.shape) != 2 or neuron_pos.shape[0] != 4:
@@ -196,12 +186,349 @@ def load_data(data_path, interactive = True):
         print("start loading stimulus data...")
     stimulus_files = [os.path.join(data_path, f) for f in os.listdir(data_path) if f.endswith('.csv')]
     stimulus_data = pd.read_csv(stimulus_files[0])
-    # 转化成numpy数组
-    stimulus_data = np.array(stimulus_data)
-
     if interactive:
         print("stimulus data loaded successfully!")
     return neuron_data, neuron_pos, trigger_data['start_edge'], stimulus_data
+
+# %% 预处理数据
+def preprocess_data(neuron_data, neuron_pos, trigger_data, stimulus_data, 
+                   stim_duration=20, baseline_duration=10):
+    """
+    神经数据预处理pipeline
+    
+    参数:
+    neuron_data: 神经元数据 (时间点 x 神经元数)
+    neuron_pos: 神经元位置
+    trigger_data: 刺激触发时间点
+    stimulus_data: 刺激标签数据
+    stim_duration: 刺激持续时间帧数
+    baseline_duration: 基线时间帧数
+    
+    返回:
+    processed_data: 预处理后的特征矩阵
+    labels: 标签数组
+    feature_info: 特征信息字典
+    """
+    from sklearn.preprocessing import StandardScaler, RobustScaler
+    from sklearn.decomposition import PCA
+    from sklearn.feature_selection import SelectKBest, f_classif, VarianceThreshold
+    from scipy import signal
+    from scipy.stats import zscore
+    import warnings
+    warnings.filterwarnings('ignore')
+    
+    print("开始数据预处理...")
+    
+    # 1. 提取试次数据和标签
+    print("1. 提取试次数据...")
+    trials_data = []
+    labels = []
+    
+    for i, start_frame in enumerate(trigger_data):
+        if i >= len(stimulus_data):
+            break
+            
+        # 确保不越界
+        if start_frame + stim_duration <= neuron_data.shape[0]:
+            # 提取刺激期数据
+            stim_data = neuron_data[start_frame:start_frame+stim_duration, :]
+            
+            # 提取基线数据 (刺激前)
+            baseline_start = max(0, start_frame - baseline_duration)
+            baseline_data = neuron_data[baseline_start:start_frame, :]
+            
+            if baseline_data.shape[0] > 0:
+                # 基线归一化: (stim - baseline) / baseline_std
+                baseline_mean = np.mean(baseline_data, axis=0)
+                baseline_std = np.std(baseline_data, axis=0) + 1e-8  # 避免除零
+                
+                # dF/F计算
+                df_f = (stim_data - baseline_mean) / baseline_mean
+                df_f = np.nan_to_num(df_f, 0)  # 处理NaN值
+                
+                trials_data.append(df_f.flatten())  # 展平为1D特征向量
+                
+                # 获取标签
+                label = stimulus_data.iloc[i]['label'] if 'label' in stimulus_data.columns else 1
+                labels.append(label)
+    
+    if not trials_data:
+        raise ValueError("未能提取到有效的试次数据")
+    
+    X = np.array(trials_data)
+    y = np.array(labels)
+    
+    print(f"   提取到 {len(trials_data)} 个试次")
+    print(f"   原始特征维度: {X.shape[1]}")
+    print(f"   标签分布: {np.unique(y, return_counts=True)}")
+    
+    # 2. 噪声处理和平滑
+    print("2. 噪声处理...")
+    X_denoised = np.zeros_like(X)
+    
+    for i in range(X.shape[0]):
+        # 重塑为时间x神经元矩阵
+        trial_matrix = X[i].reshape(stim_duration, -1)
+        
+        # 时域平滑 (高斯滤波)
+        for neuron_idx in range(trial_matrix.shape[1]):
+            trial_matrix[:, neuron_idx] = signal.gaussian_filter1d(
+                trial_matrix[:, neuron_idx], sigma=0.8)
+        
+        X_denoised[i] = trial_matrix.flatten()
+    
+    X = X_denoised
+    
+    # 3. 方差过滤 - 去除低方差特征
+    print("3. 方差过滤...")
+    variance_selector = VarianceThreshold(threshold=0.01)  # 去除方差<0.01的特征
+    X = variance_selector.fit_transform(X)
+    print(f"   方差过滤后特征维度: {X.shape[1]}")
+    
+    # 4. 数据标准化
+    print("4. 数据标准化...")
+    scaler = RobustScaler()  # 对异常值更鲁棒
+    X_scaled = scaler.fit_transform(X)
+    
+    # 5. 特征选择 - 选择最有判别力的特征
+    print("5. 特征选择...")
+    n_features = min(500, X_scaled.shape[1] // 2)  # 选择500个特征或一半特征
+    selector = SelectKBest(score_func=f_classif, k=n_features)
+    X_selected = selector.fit_transform(X_scaled, y)
+    print(f"   特征选择后维度: {X_selected.shape[1]}")
+    
+    # 6. PCA降维
+    print("6. PCA降维...")
+    n_components = min(100, X_selected.shape[1], len(y)-1)  # 保留主要成分
+    pca = PCA(n_components=n_components, random_state=42)
+    X_pca = pca.fit_transform(X_selected)
+    
+    explained_ratio = np.sum(pca.explained_variance_ratio_)
+    print(f"   PCA后维度: {X_pca.shape[1]}")
+    print(f"   解释方差比: {explained_ratio:.3f}")
+    
+    # 7. Z-score标准化最终特征
+    X_final = zscore(X_pca, axis=0)
+    X_final = np.nan_to_num(X_final, 0)  # 处理NaN
+    
+    feature_info = {
+        'original_shape': X.shape,
+        'final_shape': X_final.shape,
+        'variance_selector': variance_selector,
+        'scaler': scaler,
+        'feature_selector': selector,
+        'pca': pca,
+        'explained_variance_ratio': explained_ratio,
+        'selected_features': selector.get_support(),
+        'pca_components': pca.components_
+    }
+    
+    print("预处理完成!")
+    print(f"最终特征维度: {X_final.shape}")
+    
+    return X_final, y, feature_info
+
+def handle_class_imbalance(X, y, method='smote', random_state=42):
+    """
+    处理类别不平衡问题
+    
+    参数:
+    X: 特征矩阵
+    y: 标签数组
+    method: 处理方法 ('smote', 'adasyn', 'borderline', 'random_oversample')
+    random_state: 随机种子
+    
+    返回:
+    X_resampled: 重采样后的特征矩阵
+    y_resampled: 重采样后的标签
+    """
+    from imblearn.over_sampling import SMOTE, ADASYN, BorderlineSMOTE, RandomOverSampler
+    from collections import Counter
+    
+    print(f"原始类别分布: {Counter(y)}")
+    
+    # 选择重采样策略
+    if method == 'smote':
+        sampler = SMOTE(random_state=random_state, k_neighbors=min(3, min(Counter(y).values())-1))
+    elif method == 'adasyn':
+        sampler = ADASYN(random_state=random_state, n_neighbors=min(3, min(Counter(y).values())-1))
+    elif method == 'borderline':
+        sampler = BorderlineSMOTE(random_state=random_state, k_neighbors=min(3, min(Counter(y).values())-1))
+    elif method == 'random_oversample':
+        sampler = RandomOverSampler(random_state=random_state)
+    else:
+        raise ValueError(f"不支持的重采样方法: {method}")
+    
+    try:
+        X_resampled, y_resampled = sampler.fit_resample(X, y)
+        print(f"重采样后类别分布: {Counter(y_resampled)}")
+        return X_resampled, y_resampled
+    except Exception as e:
+        print(f"重采样失败: {e}")
+        print("使用随机过采样作为备选方案...")
+        sampler = RandomOverSampler(random_state=random_state)
+        X_resampled, y_resampled = sampler.fit_resample(X, y)
+        print(f"重采样后类别分布: {Counter(y_resampled)}")
+        return X_resampled, y_resampled
+
+def improved_classification(X, y, test_size=0.3, random_state=42):
+    """
+    改进的分类流程
+    
+    参数:
+    X: 预处理后的特征矩阵
+    y: 标签数组
+    test_size: 测试集比例
+    random_state: 随机种子
+    
+    返回:
+    results: 分类结果字典
+    """
+    from sklearn.model_selection import train_test_split, cross_val_score, StratifiedKFold
+    from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+    from sklearn.svm import SVC
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.metrics import classification_report, accuracy_score, confusion_matrix
+    from sklearn.utils.class_weight import compute_class_weight
+    import warnings
+    warnings.filterwarnings('ignore')
+    
+    print("开始改进的分类测试...")
+    
+    # 分层划分训练测试集
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=test_size, random_state=random_state, stratify=y)
+    
+    print(f"训练集大小: {X_train.shape[0]}, 测试集大小: {X_test.shape[0]}")
+    
+    # 计算类权重
+    classes = np.unique(y_train)
+    class_weights = compute_class_weight('balanced', classes=classes, y=y_train)
+    class_weight_dict = dict(zip(classes, class_weights))
+    print(f"类权重: {class_weight_dict}")
+    
+    # 定义多个分类器
+    classifiers = {
+        'RandomForest': RandomForestClassifier(
+            n_estimators=100, 
+            class_weight='balanced',
+            random_state=random_state,
+            max_depth=10,
+            min_samples_split=5
+        ),
+        'GradientBoosting': GradientBoostingClassifier(
+            n_estimators=100,
+            learning_rate=0.1,
+            random_state=random_state,
+            max_depth=5
+        ),
+        'SVM': SVC(
+            kernel='rbf', 
+            class_weight='balanced',
+            random_state=random_state,
+            probability=True
+        ),
+        'LogisticRegression': LogisticRegression(
+            class_weight='balanced',
+            random_state=random_state,
+            max_iter=1000,
+            C=1.0
+        )
+    }
+    
+    results = {}
+    
+    # 交叉验证设置
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=random_state)
+    
+    for name, clf in classifiers.items():
+        print(f"\n=== {name} ===")
+        
+        # 训练模型
+        clf.fit(X_train, y_train)
+        
+        # 预测
+        y_pred = clf.predict(X_test)
+        
+        # 测试准确率
+        test_acc = accuracy_score(y_test, y_pred)
+        
+        # 交叉验证
+        cv_scores = cross_val_score(clf, X_train, y_train, cv=cv, scoring='accuracy')
+        cv_mean = cv_scores.mean()
+        cv_std = cv_scores.std()
+        
+        print(f"测试准确率: {test_acc:.3f}")
+        print(f"交叉验证准确率: {cv_mean:.3f} ± {cv_std:.3f}")
+        
+        # 分类报告
+        report = classification_report(y_test, y_pred)
+        print("分类报告:")
+        print(report)
+        
+        # 混淆矩阵
+        cm = confusion_matrix(y_test, y_pred)
+        print("混淆矩阵:")
+        print(cm)
+        
+        results[name] = {
+            'model': clf,
+            'test_accuracy': test_acc,
+            'cv_mean': cv_mean,
+            'cv_std': cv_std,
+            'classification_report': report,
+            'confusion_matrix': cm,
+            'predictions': y_pred
+        }
+    
+    # 找出最佳模型
+    best_model_name = max(results.keys(), key=lambda k: results[k]['cv_mean'])
+    print(f"\n最佳模型: {best_model_name}")
+    print(f"最佳交叉验证准确率: {results[best_model_name]['cv_mean']:.3f}")
+    
+    results['best_model'] = best_model_name
+    results['X_train'] = X_train
+    results['X_test'] = X_test
+    results['y_train'] = y_train
+    results['y_test'] = y_test
+    
+    return results
+
+def run_complete_pipeline(data_path):
+    """
+    运行完整的预处理和分类流程
+    
+    参数:
+    data_path: 数据路径
+    
+    返回:
+    results: 完整结果
+    """
+    print("=== 开始完整流程 ===")
+    
+    # 1. 加载数据
+    neuron_data, neuron_pos, trigger_data, stimulus_data = load_data(data_path)
+    trigger_data = trigger_data[1:180]  # 保持180维，去掉首尾各1个
+    
+    # 2. 预处理
+    X_processed, y, feature_info = preprocess_data(
+        neuron_data, neuron_pos, trigger_data, stimulus_data)
+    
+    print(f"\n原始数据 - 特征: {feature_info['original_shape']}, 标签: {len(y)}")
+    print(f"预处理后 - 特征: {feature_info['final_shape']}, 解释方差: {feature_info['explained_variance_ratio']:.3f}")
+    
+    # 3. 处理类别不平衡
+    X_balanced, y_balanced = handle_class_imbalance(X_processed, y, method='smote')
+    
+    # 4. 分类测试
+    results = improved_classification(X_balanced, y_balanced)
+    
+    return {
+        'feature_info': feature_info,
+        'original_data': (X_processed, y),
+        'balanced_data': (X_balanced, y_balanced),
+        'classification_results': results
+    }
 
 # %%
 if __name__ == '__main__':
@@ -210,8 +537,7 @@ if __name__ == '__main__':
     data_path = r'E:\Cloud\桂沄\我的资料库\Micedata\M74_0816'
     neuron_data, neuron_pos, trigger_data, stimulus_data = load_data(data_path)
     # 保持180维，去掉首尾各1个
-    trigger_data = trigger_data[1:181]
-
+    trigger_data = trigger_data[1:180]
     # %% 简单可视化一下原始神经信号
     def plot_neuron_data(neuron_data, trigger_data, stimulus_data):
         
@@ -227,291 +553,7 @@ if __name__ == '__main__':
         plt.show()
     plot_neuron_data(neuron_data[:,100], trigger_data, stimulus_data)
     # %% 将神经信号划分为trail，并标记label
-    def segment_neuron_data(neuron_data, trigger_data, stimulus_data, pre_frames=20, post_frames=500, baseline_correct=True):
-        """
-        改进的数据分割函数
-        
-        参数:
-        pre_frames: 刺激前的帧数（用于基线）
-        post_frames: 刺激后的帧数（用于反应）
-        baseline_correct: 是否进行基线校正 (ΔF/F)
-        """
-        total_frames = pre_frames + post_frames
-        segments = np.zeros((len(trigger_data)-1, neuron_data.shape[1], total_frames))
-        labels = []
-        
-        for i in range(len(trigger_data) - 1):
-            start = trigger_data[i] - pre_frames
-            end = trigger_data[i] + post_frames
-            
-            # 边界检查
-            if start < 0 or end >= neuron_data.shape[0]:
-                print(f"警告: 第{i}个刺激的时间窗口超出边界，跳过")
-                continue
-                
-            segment = neuron_data[start:end, :]
-            
-            # 基线校正 (ΔF/F)
-            if baseline_correct:
-                baseline = np.mean(segment[:pre_frames, :], axis=0, keepdims=True)
-                # 避免除零错误
-                baseline = np.where(baseline == 0, 1e-6, baseline)
-                segment = (segment - baseline) / baseline
-            
-            segments[i] = segment.T
-            labels.append(stimulus_data[i, 0])
-            
-        return segments, labels
 
-    segments, labels = segment_neuron_data(neuron_data, trigger_data, stimulus_data, pre_frames=20, post_frames=80, baseline_correct=True)
-    
-    # %% 验证标签对齐
-    print(f"验证数据对齐:")
-    print(f"trigger数量: {len(trigger_data)-1}")  # -1因为我们用的是len(trigger_data)-1
-    print(f"stimulus数量: {len(stimulus_data)}")
-    print(f"提取的labels数量: {len(labels)}")
-    print(f"提取的segments数量: {segments.shape[0]}")
-    
-    if len(labels) != len(stimulus_data):
-        print("⚠️ 警告: labels数量与stimulus数量不匹配!")
-    
-    # 显示前10个标签和stimulus的对应关系
-    print(f"前10个stimulus类别: {stimulus_data[:10, 0] if len(stimulus_data) >= 10 else stimulus_data[:, 0]}")
-    print(f"前10个提取的labels: {labels[:10] if len(labels) >= 10 else labels}")
-    
-    # %% 重新分类标签：类别1和2强度为1的作为第3类
-    def reclassify_labels(stimulus_data):
-        new_labels = []
-        for i in range(len(stimulus_data)):  
-            category = stimulus_data[i, 0]  
-            intensity = stimulus_data[i, 1]  
-            
-            if intensity == 1:
-                new_labels.append(3)  # 强度为1的噪音刺激作为第3类
-            elif category == 1 and intensity != 1:
-                new_labels.append(1)  # 类别1且强度不为1
-            elif category == 2 and intensity != 1:
-                new_labels.append(2)  # 类别2且强度不为1
-            else:
-                new_labels.append(0)  # 其他情况标记为0（会被过滤）
-        
-        return np.array(new_labels)
-    
-    new_labels = reclassify_labels(stimulus_data)
-    print(f"标签分布: {np.unique(new_labels, return_counts=True)}")
-    
-    # %% 数据预处理：使用原始神经元发放
-    def preprocess_segments_raw(segments, n=10000, selection_method='mean_activity'):
-        """
-        改进的特征预处理函数
-        
-        参数:
-        segments: 分割的神经数据
-        n: 选择的神经元数量
-        selection_method: 选择方法 ('variance', 'mean_activity', 'random')
-        """
-        n_trials, n_neurons, n_timepoints = segments.shape
-        print(f"原始数据形状: {segments.shape}")
-        
-        # 基于方差或活动强度选择神经元
-        if n < n_neurons:
-            if selection_method == 'variance':
-                # 计算每个神经元在所有trial和时间点上的方差
-                neuron_variance = np.var(segments.reshape(n_trials * n_timepoints, n_neurons), axis=0)
-                neuron_indices = np.argsort(neuron_variance)[-n:]  # 选择方差最大的n个
-                print(f"基于方差选择了{n}个神经元，方差范围: {neuron_variance[neuron_indices].min():.4f} - {neuron_variance[neuron_indices].max():.4f}")
-                
-            elif selection_method == 'mean_activity':
-                # 计算每个神经元的平均活动强度
-                neuron_activity = np.mean(np.abs(segments.reshape(n_trials * n_timepoints, n_neurons)), axis=0)
-                neuron_indices = np.argsort(neuron_activity)[-n:]  # 选择活动最强的n个
-                print(f"基于平均活动选择了{n}个神经元，活动范围: {neuron_activity[neuron_indices].min():.4f} - {neuron_activity[neuron_indices].max():.4f}")
-                
-            elif selection_method == 'random':
-                np.random.seed(42)  # 设置随机种子保证可重现性
-                neuron_indices = np.random.choice(n_neurons, n, replace=False)
-                print(f"随机选择了{n}个神经元")
-                
-            else:
-                raise ValueError(f"未知的选择方法: {selection_method}")
-        else:
-            neuron_indices = np.arange(n_neurons)
-            print(f"使用所有{n_neurons}个神经元")
-            
-        # 重新组织数据：(trials, timepoints, neurons)
-        segments_transposed = np.transpose(segments, (0, 2, 1))
-        segments_selected = segments_transposed[:, :, neuron_indices]
-        
-        print(f"最终数据形状: {segments_selected.shape}")
-        return segments_selected
 
-    # 提取原始特征 - 使用方差选择最活跃的神经元
-    segments_raw = preprocess_segments_raw(segments, n=5000, selection_method='mean_activity')
-    n_trials, n_timepoints, n_neurons = segments_raw.shape
-    
-    # 过滤掉标签为0的样本
-    valid_indices = new_labels != 0
-    segments_valid = segments_raw[valid_indices]
-    y_valid = new_labels[valid_indices]
-    
-    print(f"有效试验数: {segments_valid.shape[0]}")
-    print(f"时间点数: {segments_valid.shape[1]}")
-    print(f"神经元数: {segments_valid.shape[2]}")
-    print(f"有效标签分布: {np.unique(y_valid, return_counts=True)}")
-    
-    # %% 改进的时间点分类
-    def train_svm_timewise(segments_valid, y_valid):
-        """改进的SVM时间点分类函数"""
-        n_trials, n_timepoints, n_neurons = segments_valid.shape
-        
-        # 分割训练集和测试集
-        train_idx, test_idx = train_test_split(range(len(y_valid)), 
-                                               test_size=0.3,  # 增加测试集比例
-                                               random_state=42, 
-                                               stratify=y_valid)
-        
-        segments_train = segments_valid[train_idx]
-        segments_test = segments_valid[test_idx]
-        y_train = y_valid[train_idx]
-        y_test = y_valid[test_idx]
-        
-        print(f"训练集大小: {len(y_train)}, 测试集大小: {len(y_test)}")
-        print(f"训练集标签分布: {np.unique(y_train, return_counts=True)}")
-        print(f"测试集标签分布: {np.unique(y_test, return_counts=True)}")
-        
-        accuracies = []
-        models = []
-        scalers = []
-        
-        print(f"对每个时间点({n_timepoints}个)进行分类...")
-        
-        for t in range(n_timepoints):
-            # 当前时间点的特征矩阵
-            X_train_t = segments_train[:, t, :]  # (n_train_trials, n_neurons)
-            X_test_t = segments_test[:, t, :]    # (n_test_trials, n_neurons)
-            
-            # 检查是否有NaN或Inf
-            if np.any(np.isnan(X_train_t)) or np.any(np.isinf(X_train_t)):
-                print(f"警告: 时间点{t}的训练数据包含NaN或Inf")
-                X_train_t = np.nan_to_num(X_train_t)
-                X_test_t = np.nan_to_num(X_test_t)
-            
-            # 特征标准化 - 只有在方差不为0时才标准化
-            scaler = StandardScaler()
-            X_train_scaled = scaler.fit_transform(X_train_t)
-            X_test_scaled = scaler.transform(X_test_t)
-            
-            # 改进的SVM参数
-            svm_model = SVC(kernel='rbf', 
-                          C=1.0,  # 可以尝试调整
-                          gamma='scale',  # 自动缩放
-                          random_state=42, 
-                          probability=True,
-                          class_weight='balanced')  # 平衡类别权重
-            
-            try:
-                svm_model.fit(X_train_scaled, y_train)
-                y_pred = svm_model.predict(X_test_scaled)
-                accuracy = np.mean(y_pred == y_test)
-            except Exception as e:
-                print(f"时间点{t}训练失败: {e}")
-                accuracy = 0.0
-                svm_model = None
-            
-            accuracies.append(accuracy)
-            models.append(svm_model)
-            scalers.append(scaler)
-            
-            if (t + 1) % 10 == 0:
-                print(f"时间点 {t+1}/{n_timepoints} 完成，准确率: {accuracy:.3f}")
-        
-        return {
-            'accuracies': np.array(accuracies),
-            'models': models,
-            'scalers': scalers,
-            'y_test': y_test,
-            'train_idx': train_idx,
-            'test_idx': test_idx
-        }
-    
-    # 结果可视化：准确率随时间变化的曲线
-    def plot_timewise_accuracy(timewise_results, y_valid):
-        plt.figure(figsize=(16, 8))
-        
-        # 准确率随时间变化曲线
-        plt.subplot(2, 2, 1)
-        time_points = range(1, len(timewise_results['accuracies']) + 1)
-        plt.plot(time_points, timewise_results['accuracies'], 'b-', linewidth=2, alpha=0.7)
-        plt.axhline(y=timewise_results['accuracies'].mean(), color='r', linestyle='--', 
-                   label=f'平均准确率: {timewise_results["accuracies"].mean():.3f}')
-        plt.fill_between(time_points, timewise_results['accuracies'], alpha=0.3)
-        plt.xlabel('时间点')
-        plt.ylabel('分类准确率')
-        plt.title('SVM分类准确率随时间变化')
-        plt.grid(True, alpha=0.3)
-        plt.legend()
-        plt.ylim(0, 1)
-        
-        # 准确率分布直方图
-        plt.subplot(2, 2, 2)
-        plt.hist(timewise_results['accuracies'], bins=20, alpha=0.7, color='skyblue', edgecolor='black')
-        plt.axvline(timewise_results['accuracies'].mean(), color='r', linestyle='--', linewidth=2,
-                   label=f'平均: {timewise_results["accuracies"].mean():.3f}')
-        plt.xlabel('准确率')
-        plt.ylabel('频次')
-        plt.title('准确率分布直方图')
-        plt.legend()
-        plt.grid(True, alpha=0.3)
-        
-        # 类别分布
-        plt.subplot(2, 2, 3)
-        unique_labels = np.unique(y_valid)
-        label_counts = [np.sum(y_valid == label) for label in unique_labels]
-        bars = plt.bar(unique_labels, label_counts, color=['lightcoral', 'lightblue', 'lightgreen'])
-        plt.title('类别分布')
-        plt.xlabel('类别 (1:类别1, 2:类别2, 3:噪音)')
-        plt.ylabel('样本数量')
-        for bar, count in zip(bars, label_counts):
-            plt.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.5, 
-                    str(count), ha='center', va='bottom')
-        
-        # 最高和最低准确率时间点标记
-        plt.subplot(2, 2, 4)
-        plt.plot(time_points, timewise_results['accuracies'], 'b-', linewidth=2, alpha=0.7)
-        
-        # 标记最高准确率点
-        max_idx = timewise_results['accuracies'].argmax()
-        plt.scatter(max_idx + 1, timewise_results['accuracies'][max_idx], 
-                   color='red', s=100, zorder=5, label=f'最高: {timewise_results["accuracies"][max_idx]:.3f}')
-        
-        # 标记最低准确率点  
-        min_idx = timewise_results['accuracies'].argmin()
-        plt.scatter(min_idx + 1, timewise_results['accuracies'][min_idx], 
-                   color='orange', s=100, zorder=5, label=f'最低: {timewise_results["accuracies"][min_idx]:.3f}')
-        
-        plt.xlabel('时间点')
-        plt.ylabel('分类准确率')
-        plt.title('关键时间点标记')
-        plt.grid(True, alpha=0.3)
-        plt.legend()
-        plt.ylim(0, 1)
-        
-        plt.tight_layout()
-        plt.show()
-    
-    # 检查是否有足够的类别进行分类
-    if len(np.unique(y_valid)) >= 2:
-        print("开始每个时间点的SVM分类...")
-        timewise_results = train_svm_timewise(segments_valid, y_valid)
-        
-        print(f"\n各时间点准确率统计:")
-        print(f"平均准确率: {timewise_results['accuracies'].mean():.3f}")
-        print(f"最高准确率: {timewise_results['accuracies'].max():.3f} (时间点 {timewise_results['accuracies'].argmax()+1})")
-        print(f"最低准确率: {timewise_results['accuracies'].min():.3f} (时间点 {timewise_results['accuracies'].argmin()+1})")
-        
-        plot_timewise_accuracy(timewise_results, y_valid)
-        
-    else:
-        print("数据中类别不足，无法进行分类")
-    
+
 # %%

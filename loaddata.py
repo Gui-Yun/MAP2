@@ -30,7 +30,7 @@ class Config:
     """统一参数配置类"""
     
     # 数据路径
-    DATA_PATH = r'F:\brain\Micedata\M74_0816'
+    DATA_PATH = r'F:\brain\Micedata\M65_0816'
     
     # 触发文件处理参数
     IPD = 5                    # 刺激呈现时长(s)
@@ -79,9 +79,9 @@ class Config:
     NEURON_THRESHOLD = 1000   # 使用原始RR方法的神经元数量阈值
     
     # 试验范围（用于去掉首尾）
-    TRIAL_START_SKIP = 1      # 跳过开头的试验数
-    TRIAL_END_SKIP = 1        # 跳过结尾的试验数
-    TOTAL_TRIALS = 180        # 保持的试验总数
+    TRIAL_START_SKIP = 0     # 跳过开头的试验数
+    TRIAL_END_SKIP = 0      # 跳过结尾的试验数
+    TOTAL_TRIALS = 176      # 保持的试验总数
     
     # 预处理参数
     ENABLE_PREPROCESSING = True      # 是否启用预处理
@@ -241,7 +241,7 @@ def process_trigger(txt_file, IPD=cfg.IPD, ISI=cfg.ISI, fre=None, min_sti_gap=cf
     }
 
 # %% 加载数据
-def load_data(data_path, interactive = True):
+def load_data(data_path, start_idx=cfg.TRIAL_START_SKIP, end_idx=cfg.TRIAL_START_SKIP + cfg.TOTAL_TRIALS, interactive = True):
     ######### 读取神经数据 #########
     if interactive:
         print("start loading neuron data...")
@@ -282,6 +282,7 @@ def load_data(data_path, interactive = True):
         print("start loading trigger data...")
     trigger_files = [os.path.join(data_path, f) for f in os.listdir(data_path) if f.endswith('.txt')]
     trigger_data = process_trigger(trigger_files[0])
+    
     if interactive:
         print("trigger data loaded successfully!")
         print(f"Extracted {trigger_data['stimuli_count']} stimuli, total time steps: {trigger_data['camera_frames']}")
@@ -293,10 +294,16 @@ def load_data(data_path, interactive = True):
     stimulus_data = pd.read_csv(stimulus_files[0])
     # 转化成numpy数组
     stimulus_data = np.array(stimulus_data)
-
+    
+    # 保持指定试验数，去掉首尾 - 对触发数据和刺激数据同时处理
+    start_edges = trigger_data['start_edge'][start_idx:end_idx]
+    stimulus_data = stimulus_data[start_idx:end_idx, :]
+    
     if interactive:
         print("stimulus data loaded successfully!")
-    return neuron_data, neuron_pos, trigger_data['start_edge'], stimulus_data
+        print(f"Using trials {start_idx} to {end_idx-1}, total: {len(start_edges)} trials")
+    
+    return neuron_data, neuron_pos, start_edges, stimulus_data
 
 # %% 预处理函数
 def preprocess_neural_data(segments, labels, method='comprehensive'):
@@ -555,10 +562,7 @@ if __name__ == '__main__':
     # %% 加载数据
     neuron_data, neuron_pos, trigger_data, stimulus_data = load_data(cfg.DATA_PATH)
     
-    # 保持指定试验数，去掉首尾
-    start_idx = cfg.TRIAL_START_SKIP
-    end_idx = start_idx + cfg.TOTAL_TRIALS
-    trigger_data = trigger_data[start_idx:end_idx]
+
 
     # %% 简单可视化一下原始神经信号
     def plot_neuron_data(neuron_data, trigger_data, stimulus_data):
@@ -803,7 +807,7 @@ if __name__ == '__main__':
         print(f"RR神经元索引: {sorted(rr_results['rr_neurons'][:20])}{'...' if len(rr_results['rr_neurons']) > 20 else ''}")
     
     # 保存RR神经元筛选结果
-    rr_save_path = os.path.join(data_path, 'RR_Neurons_Results.mat')
+    rr_save_path = os.path.join(cfg.DATA_PATH, 'RR_Neurons_Results.mat')
     scipy.io.savemat(rr_save_path, {
         'rr_neurons': np.array(rr_results['rr_neurons']),
         'response_neurons': np.array(rr_results['response_neurons']),

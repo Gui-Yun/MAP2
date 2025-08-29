@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "WebFetch(domain:cebra.ai)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(python:*)"
     ],
     "deny": [],
     "ask": []

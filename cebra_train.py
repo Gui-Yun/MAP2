@@ -18,12 +18,16 @@ DATA_PATH = "/app/data"    # Docker内数据路径
 class CEBRAConfig:
     # CEBRA模型参数
     MODEL_ARCH = 'offset10-model'
-    OUTPUT_DIM = 16
-    BATCH_SIZE = 512
+    OUTPUT_DIM = 3           # 降低输出维度用于可视化
+    BATCH_SIZE = 256         # 减小batch size适应CPU
     LEARNING_RATE = 3e-4
     TEMPERATURE = 1.0
-    MAX_ITERATIONS = 5000  # 减少迭代次数用于快速测试
+    MAX_ITERATIONS = 10000   # 增加迭代次数确保收敛
     DEVICE = 'cpu'
+    
+    # 行为模型专用参数
+    BEHAVIOR_OUTPUT_DIM = 8  # 行为模型可以用稍高维度
+    TIME_OUTPUT_DIM = 3      # 时间模型用低维度
     
     # 可视化参数
     FIGURE_SIZE = (12, 8)
@@ -49,17 +53,27 @@ def load_cebra_data(data_type='time'):
     if data_type == 'time':
         data_file = os.path.join(cebra_data_dir, 'cebra_time_data.npz')
         data = np.load(data_file)
-        return data['neural_data'], None
+        neural_data = data['neural_data']
+        print(f"Time数据统计: shape={neural_data.shape}, min={neural_data.min():.3f}, max={neural_data.max():.3f}")
+        return neural_data, None
     
     elif data_type == 'behavior':
         data_file = os.path.join(cebra_data_dir, 'cebra_behavior_data.npz')
         data = np.load(data_file)
-        return data['neural_data'], data['category_labels']
+        neural_data = data['neural_data'] 
+        labels = data['category_labels']  # 使用类别标签而非连续标签
+        print(f"Behavior数据统计: neural_shape={neural_data.shape}, labels_shape={labels.shape}")
+        print(f"Neural数据: min={neural_data.min():.3f}, max={neural_data.max():.3f}")
+        print(f"标签分布: {np.unique(labels, return_counts=True)}")
+        return neural_data, labels
     
     elif data_type == 'hybrid':
         data_file = os.path.join(cebra_data_dir, 'cebra_hybrid_data.npz')
         data = np.load(data_file)
-        return data['neural_data'], data['behavioral_labels']
+        neural_data = data['neural_data']
+        behavioral_labels = data['behavioral_labels']
+        print(f"Hybrid数据统计: neural_shape={neural_data.shape}, behavioral_shape={behavioral_labels.shape}")
+        return neural_data, behavioral_labels
     
     else:
         raise ValueError(f"Unsupported data type: {data_type}")
@@ -69,13 +83,14 @@ def train_cebra_time(neural_data):
     import cebra
     
     print("训练CEBRA-Time模型...")
+    print(f"输入数据形状: {neural_data.shape}")
     
     model = cebra.CEBRA(
         model_architecture=cfg.MODEL_ARCH,
         batch_size=cfg.BATCH_SIZE,
         learning_rate=cfg.LEARNING_RATE,
         temperature=cfg.TEMPERATURE,
-        output_dimension=cfg.OUTPUT_DIM,
+        output_dimension=cfg.TIME_OUTPUT_DIM,
         max_iterations=cfg.MAX_ITERATIONS,
         device=cfg.DEVICE,
         verbose=True
@@ -83,6 +98,7 @@ def train_cebra_time(neural_data):
     
     model.fit(neural_data)
     embedding = model.transform(neural_data)
+    print(f"Time嵌入形状: {embedding.shape}")
     
     return model, embedding
 
@@ -91,13 +107,16 @@ def train_cebra_behavior(neural_data, labels):
     import cebra
     
     print("训练CEBRA-Behavior模型...")
+    print(f"输入数据形状: {neural_data.shape}")
+    print(f"标签形状: {labels.shape}")
+    print(f"标签分布: {np.unique(labels, return_counts=True)}")
     
     model = cebra.CEBRA(
         model_architecture=cfg.MODEL_ARCH,
         batch_size=cfg.BATCH_SIZE,
         learning_rate=cfg.LEARNING_RATE,
         temperature=cfg.TEMPERATURE,
-        output_dimension=cfg.OUTPUT_DIM,
+        output_dimension=cfg.BEHAVIOR_OUTPUT_DIM,
         max_iterations=cfg.MAX_ITERATIONS,
         device=cfg.DEVICE,
         verbose=True
@@ -105,6 +124,7 @@ def train_cebra_behavior(neural_data, labels):
     
     model.fit(neural_data, labels)
     embedding = model.transform(neural_data)
+    print(f"Behavior嵌入形状: {embedding.shape}")
     
     return model, embedding
 
@@ -184,10 +204,17 @@ def main():
     setup_environment()
     
     try:
+        # 先检查数据可用性
+        print("\n0. 数据检查...")
+        cebra_data_dir = os.path.join(DATA_PATH, 'cebra_data')
+        if not os.path.exists(cebra_data_dir):
+            print(f"错误：CEBRA数据目录不存在: {cebra_data_dir}")
+            print("请先运行manifold.py生成CEBRA数据")
+            return
+            
         # 1. CEBRA-Time训练
         print("\n1. CEBRA-Time训练...")
         neural_data, _ = load_cebra_data('time')
-        print(f"数据形状: {neural_data.shape}")
         
         model_time, embedding_time = train_cebra_time(neural_data)
         

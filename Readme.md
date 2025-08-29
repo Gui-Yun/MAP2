@@ -10,6 +10,7 @@ MAP2是一个综合的神经数据分析处理框架，专门用于处理双光�
 MAP2/
 ├── loaddata.py          # 核心数据处理模块
 ├── manifold.py          # 降维分析和CEBRA数据处理
+├── cebra_train.py       # Docker环境CEBRA训练脚本
 ├── rr_neuron_selection.py # RR神经元筛选算法
 └── README.md           # 项目文档
 ```
@@ -259,6 +260,54 @@ cebra_data = prepare_cebra_data(segments, stimulus_data, rr_results['rr_neurons'
 # 2. 保存数据
 save_cebra_data(cebra_data, 'path/to/cebra_output')
 ```
+
+### 4. cebra_train.py - Docker环境CEBRA训练
+
+#### 功能概述
+- 在Docker环境中运行CEBRA训练
+- 支持CEBRA-Time和CEBRA-Behavior模型
+- CPU训练配置，适合快速测试
+- 自动保存可视化结果和嵌入数据
+
+#### 配置参数
+```python
+class CEBRAConfig:
+    MODEL_ARCH = 'offset10-model'
+    OUTPUT_DIM = 16
+    BATCH_SIZE = 512
+    LEARNING_RATE = 3e-4
+    MAX_ITERATIONS = 5000  # 减少迭代用于快速测试
+    DEVICE = 'cpu'         # CPU训练
+```
+
+#### Docker使用方法
+
+**一键运行命令**:
+```bash
+docker run --rm -it \
+  -v "F:\brain\Project\MAP2:/app" \
+  -v "F:\brain\Micedata\M65_0816:/app/data" \
+  -v "F:\brain\repos\CEBRA:/app/CEBRA" \
+  -v "F:\brain\Project\MAP2\cebra_results:/app/results" \
+  your-cebra-container \
+  python /app/cebra_train.py
+```
+
+**卷挂载说明**:
+- 项目代码: `F:\brain\Project\MAP2` → `/app`
+- 数据目录: `F:\brain\Micedata\M65_0816` → `/app/data` 
+- CEBRA仓库: `F:\brain\repos\CEBRA` → `/app/CEBRA`
+- 结果输出: `F:\brain\Project\MAP2\cebra_results` → `/app/results`
+
+**输出文件**:
+- `cebra_time_2d.png` / `cebra_time_3d.png`: Time模型可视化
+- `cebra_behavior_2d.png` / `cebra_behavior_3d.png`: Behavior模型可视化
+- `cebra_time_embedding.npz` / `cebra_behavior_embedding.npz`: 嵌入数据
+
+#### 前置条件
+1. 已运行`manifold.py`生成CEBRA数据
+2. 本地有CEBRA Docker容器
+3. 确保数据路径正确挂载
 
 ## 参数调优指南
 

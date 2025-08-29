@@ -300,16 +300,23 @@ def prepare_cebra_data(segments, stimulus_data, rr_neurons=None, use_stimulus_on
     n_trials, n_neurons, n_timepoints = neural_segments.shape
     print(f"数据形状: {n_trials} trials × {n_neurons} neurons × {n_timepoints} timepoints")
     
-    # 方法1: 展平成连续时间序列 (CEBRA-Time)
-    # 将所有trial连接成一个长时间序列
-    neural_timeseries = neural_segments.reshape(-1, n_neurons)  # (trials*timepoints, neurons)
+    # 数据质量检查
+    print(f"神经数据统计: min={neural_segments.min():.3f}, max={neural_segments.max():.3f}, mean={neural_segments.mean():.3f}")
+    print(f"刺激标签分布: {np.unique(stimulus_data, axis=0, return_counts=True)}")
     
-    # 创建对应的时间戳
+    # 方法1: 正确展平成连续时间序列 (CEBRA-Time)
+    # 重要：保持每个trial内的时间连续性，按trial顺序连接
+    neural_timeseries = neural_segments.transpose(0, 2, 1).reshape(-1, n_neurons)  # (trials*timepoints, neurons)
+    
+    # 创建对应的时间戳 - 保持全局时间连续性
     timestamps = np.arange(neural_timeseries.shape[0])
     
-    # 创建对应的标签时间序列
+    # 创建对应的标签时间序列 - 每个trial内所有时间点使用相同标签
     category_timeseries = np.repeat(stimulus_data[:, 0], n_timepoints)  # 类别标签
     intensity_timeseries = np.repeat(stimulus_data[:, 1], n_timepoints)  # 强度标签
+    
+    # 创建trial索引用于追踪数据来源
+    trial_indices = np.repeat(np.arange(n_trials), n_timepoints)
     
     # 方法2: 保持trial结构用于CEBRA-Behavior
     # trial级别的标签
@@ -320,11 +327,15 @@ def prepare_cebra_data(segments, stimulus_data, rr_neurons=None, use_stimulus_on
     }
     
     # 方法3: 创建连续标签用于CEBRA混合模式
-    # 为每个时间点创建连续的"行为"标签
-    behavioral_labels = np.zeros((neural_timeseries.shape[0], 3))
+    # 为每个时间点创建连续的"行为"标签，包含时间内信息
+    behavioral_labels = np.zeros((neural_timeseries.shape[0], 4))
     behavioral_labels[:, 0] = category_timeseries  # 类别
     behavioral_labels[:, 1] = intensity_timeseries  # 强度
-    behavioral_labels[:, 2] = timestamps / neural_timeseries.shape[0]  # 归一化时间
+    behavioral_labels[:, 2] = trial_indices  # trial索引
+    
+    # 创建trial内时间位置标签 (0到n_timepoints-1, 在每个trial内重复)
+    within_trial_time = np.tile(np.arange(n_timepoints), n_trials)
+    behavioral_labels[:, 3] = within_trial_time / (n_timepoints - 1)  # 归一化的trial内时间
     
     return {
         # CEBRA-Time格式: 纯时间序列，无标签
@@ -338,7 +349,9 @@ def prepare_cebra_data(segments, stimulus_data, rr_neurons=None, use_stimulus_on
             'neural_data': neural_timeseries.astype(np.float32),
             'category_labels': category_timeseries.astype(np.int32),
             'intensity_labels': intensity_timeseries.astype(np.int32),
-            'combined_labels': (category_timeseries * 10 + intensity_timeseries).astype(np.int32)
+            'combined_labels': (category_timeseries * 10 + intensity_timeseries).astype(np.int32),
+            'trial_indices': trial_indices.astype(np.int32),
+            'within_trial_time': within_trial_time.astype(np.int32)
         },
         
         # CEBRA-Hybrid格式: 连续标签

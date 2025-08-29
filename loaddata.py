@@ -30,7 +30,7 @@ class Config:
     """统一参数配置类"""
     
     # 数据路径
-    DATA_PATH = r'F:\brain\Micedata\M74_0816'
+    DATA_PATH = r'F:\brain\Micedata\M65_0816'
     
     # 触发文件处理参数
     IPD = 5                    # 刺激呈现时长(s)
@@ -79,9 +79,9 @@ class Config:
     NEURON_THRESHOLD = 1000   # 使用原始RR方法的神经元数量阈值
     
     # 试验范围（用于去掉首尾）
-    TRIAL_START_SKIP = 1     # 跳过开头的试验数
+    TRIAL_START_SKIP = 0     # 跳过开头的试验数
     TRIAL_END_SKIP = 0      # 跳过结尾的试验数
-    TOTAL_TRIALS = 180      # 保持的试验总数
+    TOTAL_TRIALS = 176      # 保持的试验总数
     
     # 预处理参数
     ENABLE_PREPROCESSING = True      # 是否启用预处理

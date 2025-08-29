@@ -320,22 +320,47 @@ def prepare_cebra_data(segments, stimulus_data, rr_neurons=None, use_stimulus_on
     
     # 方法2: 保持trial结构用于CEBRA-Behavior
     # trial级别的标签
-    # 将强度映射为整数: 0->0, 0.2->2, 0.5->5, 1.0->10
+    # 新的强度映射策略：基于类别的对称连续映射
+    # 类别1: 1->0, 0.5->0.5, 0.2->0.8, 0->1.0
+    # 类别2: 1->0, 0.5->-0.5, 0.2->-0.8, 0->-1.0
+    
+    intensity_continuous = np.zeros_like(stimulus_data[:, 1])
+    for i in range(len(stimulus_data)):
+        category = stimulus_data[i, 0]
+        intensity = stimulus_data[i, 1]
+        
+        if intensity == 1.0:      # 噪音强度
+            intensity_continuous[i] = 0.0
+        elif intensity == 0.5:    # 中等强度
+            intensity_continuous[i] = 0.5 if category == 1 else -0.5
+        elif intensity == 0.2:    # 低强度  
+            intensity_continuous[i] = 0.8 if category == 1 else -0.8
+        elif intensity == 0.0:    # 无噪音
+            intensity_continuous[i] = 1.0 if category == 1 else -1.0
+    
+    # 为离散标签保留旧的映射
     intensity_mapped = (stimulus_data[:, 1] * 10).astype(int)
     
     trial_labels = {
         'category': stimulus_data[:, 0].astype(int),
-        'intensity': intensity_mapped,
-        'combined': stimulus_data[:, 0].astype(int) * 100 + intensity_mapped  # 组合标签，例如100,102,105,110,200,202,205,210
+        'intensity_discrete': intensity_mapped,
+        'intensity_continuous': intensity_continuous,
+        'combined': stimulus_data[:, 0].astype(int) * 100 + intensity_mapped
     }
-    print(f"强度映射: {np.unique(stimulus_data[:, 1])} -> {np.unique(intensity_mapped)}")
+    
+    print(f"原始强度: {np.unique(stimulus_data[:, 1])}")
+    print(f"连续强度映射: {np.unique(intensity_continuous)}")
+    print(f"强度分布: {np.unique(intensity_continuous, return_counts=True)}")
     print(f"组合标签: {np.unique(trial_labels['combined'])}")
+    
+    # 创建连续强度时间序列
+    intensity_continuous_timeseries = np.repeat(intensity_continuous, n_timepoints)
     
     # 方法3: 创建连续标签用于CEBRA混合模式
     # 为每个时间点创建连续的"行为"标签，包含时间内信息
     behavioral_labels = np.zeros((neural_timeseries.shape[0], 4))
-    behavioral_labels[:, 0] = category_timeseries  # 类别
-    behavioral_labels[:, 1] = intensity_timeseries  # 强度
+    behavioral_labels[:, 0] = category_timeseries  # 类别（1, 2）
+    behavioral_labels[:, 1] = intensity_continuous_timeseries  # 连续强度（-1到1）
     behavioral_labels[:, 2] = trial_indices  # trial索引
     
     # 创建trial内时间位置标签 (0到n_timepoints-1, 在每个trial内重复)
@@ -353,7 +378,8 @@ def prepare_cebra_data(segments, stimulus_data, rr_neurons=None, use_stimulus_on
         'discrete_label_data': {
             'neural_data': neural_timeseries.astype(np.float32),
             'category_labels': category_timeseries.astype(np.int32),
-            'intensity_labels': (intensity_timeseries * 10).astype(np.int32),  # 映射强度
+            'intensity_labels': (intensity_timeseries * 10).astype(np.int32),  # 离散强度映射
+            'intensity_continuous_labels': intensity_continuous_timeseries.astype(np.float32),  # 连续强度映射
             'combined_labels': (category_timeseries.astype(int) * 100 + (intensity_timeseries * 10).astype(int)).astype(np.int32),
             'trial_indices': trial_indices.astype(np.int32),
             'within_trial_time': within_trial_time.astype(np.int32)
@@ -398,7 +424,7 @@ def save_cebra_data(cebra_data, base_path):
     """
     import json
     
-    print(f"保存CEBRA数据到: {base_path}")
+    print("保存CEBRA数据到:", base_path)
     os.makedirs(base_path, exist_ok=True)
     
     # 1. 保存CEBRA-Time数据 (纯时间序列)
@@ -408,7 +434,7 @@ def save_cebra_data(cebra_data, base_path):
         neural_data=time_data['neural_data'],
         timestamps=time_data['timestamps']
     )
-    print("✓ CEBRA-Time数据已保存")
+    print("CEBRA-Time数据已保存")
     
     # 2. 保存CEBRA-Behavior数据 (离散标签)
     discrete_data = cebra_data['discrete_label_data']
@@ -417,11 +443,12 @@ def save_cebra_data(cebra_data, base_path):
         neural_data=discrete_data['neural_data'],
         category_labels=discrete_data['category_labels'],
         intensity_labels=discrete_data['intensity_labels'],
+        intensity_continuous_labels=discrete_data['intensity_continuous_labels'],
         combined_labels=discrete_data['combined_labels'],
         trial_indices=discrete_data['trial_indices'],
         within_trial_time=discrete_data['within_trial_time']
     )
-    print("✓ CEBRA-Behavior数据已保存")
+    print("CEBRA-Behavior数据已保存")
     
     # 3. 保存CEBRA-Hybrid数据 (连续标签)
     continuous_data = cebra_data['continuous_label_data']
@@ -430,7 +457,7 @@ def save_cebra_data(cebra_data, base_path):
         neural_data=continuous_data['neural_data'],
         behavioral_labels=continuous_data['behavioral_labels']
     )
-    print("✓ CEBRA-Hybrid数据已保存")
+    print("CEBRA-Hybrid数据已保存")
     
     # 4. 保存Trial结构数据
     trial_data = cebra_data['trial_data']
@@ -440,7 +467,7 @@ def save_cebra_data(cebra_data, base_path):
         stimulus_data=trial_data['stimulus_data'],
         **{f"trial_labels_{k}": v for k, v in trial_data['trial_labels'].items()}
     )
-    print("✓ Trial结构数据已保存")
+    print("Trial结构数据已保存")
     
     # 5. 保存元数据为JSON
     metadata = cebra_data['metadata']
@@ -456,7 +483,7 @@ def save_cebra_data(cebra_data, base_path):
     
     with open(os.path.join(base_path, 'metadata.json'), 'w') as f:
         json.dump(metadata_json, f, indent=2)
-    print("✓ 元数据已保存")
+    print("元数据已保存")
     
     # 6. 创建README文件
     readme_content = """# CEBRA数据格式说明
@@ -530,13 +557,14 @@ embedding = cebra_behavior.transform(neural_data)
     
     with open(os.path.join(base_path, 'README.md'), 'w', encoding='utf-8') as f:
         f.write(readme_content)
-    print("✓ README文档已保存")
+    print("README文档已保存")
     
-    print(f"\n=== CEBRA数据保存完成 ===")
-    print(f"保存位置: {base_path}")
-    print(f"数据形状: {metadata['n_total_timepoints']} timepoints × {metadata['n_neurons']} neurons")
-    print(f"Trial数量: {metadata['n_trials']}")
-    print(f"神经元类型: {'RR神经元' if len(metadata['rr_neurons']) < metadata['n_neurons'] else '所有神经元'}")
+    print("\n=== CEBRA数据保存完成 ===")
+    print("保存位置:", base_path)
+    print("数据形状:", metadata['n_total_timepoints'], "timepoints ×", metadata['n_neurons'], "neurons")
+    print("Trial数量:", metadata['n_trials'])
+    neuron_type = 'RR神经元' if len(metadata['rr_neurons']) < metadata['n_neurons'] else '所有神经元'
+    print("神经元类型:", neuron_type)
 
 def save_data_for_cebra(X, labels, save_path):
     """
@@ -547,7 +575,7 @@ def save_data_for_cebra(X, labels, save_path):
     labels: 标签数据
     save_path: 保存路径
     """
-    print(f"保存简单CEBRA数据到: {save_path}")
+    print("保存简单CEBRA数据到:", save_path)
     
     # 保存为npz格式
     np.savez(save_path,

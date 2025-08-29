@@ -79,9 +79,21 @@ def load_cebra_data(data_type='time'):
             print("使用旧格式数据（无时间信息）")
             trial_indices = None
             within_trial_time = None
-        
-        # 策略1: 使用组合标签 (类别*10 + 强度)
-        labels = combined_labels
+            
+        # 检查连续强度标签
+        if 'intensity_continuous_labels' in available_keys:
+            intensity_continuous_labels = data['intensity_continuous_labels']
+            print("发现连续强度标签")
+            print(f"连续强度范围: {intensity_continuous_labels.min():.1f} 到 {intensity_continuous_labels.max():.1f}")
+            print(f"连续强度分布: {np.unique(intensity_continuous_labels)}")
+            
+            # 策略1: 使用连续强度标签（推荐用于CEBRA-Behavior）
+            labels = intensity_continuous_labels
+            print("使用连续强度标签进行CEBRA-Behavior训练")
+        else:
+            # 回退策略：使用组合标签
+            labels = combined_labels
+            print("使用组合标签（离散）进行CEBRA-Behavior训练")
         
         print(f"Behavior数据统计: neural_shape={neural_data.shape}, labels_shape={labels.shape}")
         print(f"Neural数据: min={neural_data.min():.3f}, max={neural_data.max():.3f}")
@@ -386,8 +398,9 @@ def main():
         print("\n2b. CEBRA-Hybrid训练 (实验性)...")
         neural_data_hybrid, behavioral_labels = load_cebra_data('hybrid')
         
-        # 使用前2列作为连续标签 (类别 + 强度)
-        continuous_labels = behavioral_labels[:, [0, 1]]  # [category, intensity]
+        # 使用前2列作为连续标签 (类别 + 连续强度)
+        continuous_labels = behavioral_labels[:, [0, 1]]  # [category, continuous_intensity]
+        print(f"Hybrid连续标签范围: 类别 {continuous_labels[:,0].min()}-{continuous_labels[:,0].max()}, 强度 {continuous_labels[:,1].min():.1f}-{continuous_labels[:,1].max():.1f}")
         model_hybrid, embedding_hybrid = train_cebra_behavior(neural_data_hybrid, continuous_labels)
         
         # 可视化Behavior结果

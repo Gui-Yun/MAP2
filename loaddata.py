@@ -30,7 +30,7 @@ class Config:
     """统一参数配置类"""
     
     # 数据路径
-    DATA_PATH = r'F:\brain\Micedata\M65_0816'
+    DATA_PATH = r'F:\brain\Micedata\M74_0816'
     
     # 触发文件处理参数
     IPD = 5                    # 刺激呈现时长(s)
@@ -41,7 +41,7 @@ class Config:
     PRE_FRAMES = 10           # 刺激前帧数（基线期）
     POST_FRAMES = 40          # 刺激后帧数（响应期）
     STIMULUS_DURATION = 20    # 刺激持续时间（帧数）
-    BASELINE_CORRECT = True  # 是否进行基线校正
+    BASELINE_CORRECT = False  # 是否进行基线校正
     
     # 标签重分类参数
     NOISE_INTENSITY = 1       # 噪音刺激强度标识
@@ -79,9 +79,9 @@ class Config:
     NEURON_THRESHOLD = 1000   # 使用原始RR方法的神经元数量阈值
     
     # 试验范围（用于去掉首尾）
-    TRIAL_START_SKIP = 0     # 跳过开头的试验数
+    TRIAL_START_SKIP = 1     # 跳过开头的试验数
     TRIAL_END_SKIP = 0      # 跳过结尾的试验数
-    TOTAL_TRIALS = 176      # 保持的试验总数
+    TOTAL_TRIALS = 180      # 保持的试验总数
     
     # 预处理参数
     ENABLE_PREPROCESSING = True      # 是否启用预处理
@@ -558,20 +558,6 @@ def improved_classification(X, y, test_size=0.3, enable_multiple=True):
         'best_cv_mean': results[best_model]['cv_mean'],
         'best_cv_std': results[best_model]['cv_std']
     }
-
-# %%
-if __name__ == '__main__':
-    print("start neuron data processing!") 
-    # %% 加载数据
-    neuron_data, neuron_pos, trigger_data, stimulus_data = load_data(cfg.DATA_PATH)
-    
-
-
-    # %% 简单可视化一下原始神经信号
-    plot_neuron_data(neuron_data[:,14858], trigger_data, stimulus_data)
-    
-    # %% 将神经信号划分为trail，并标记label
-
 # %% ========== 可视化函数 ==========
 def plot_neuron_data(neuron_data, trigger_data, stimulus_data):
     """可视化原始神经信号"""

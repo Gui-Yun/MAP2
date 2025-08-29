@@ -558,6 +558,7 @@ def improved_classification(X, y, test_size=0.3, enable_multiple=True):
         'best_cv_mean': results[best_model]['cv_mean'],
         'best_cv_std': results[best_model]['cv_std']
     }
+
 # %% ========== 可视化函数 ==========
 def plot_neuron_data(neuron_data, trigger_data, stimulus_data):
     """可视化原始神经信号"""

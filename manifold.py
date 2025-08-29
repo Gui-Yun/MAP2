@@ -320,11 +320,16 @@ def prepare_cebra_data(segments, stimulus_data, rr_neurons=None, use_stimulus_on
     
     # 方法2: 保持trial结构用于CEBRA-Behavior
     # trial级别的标签
+    # 将强度映射为整数: 0->0, 0.2->2, 0.5->5, 1.0->10
+    intensity_mapped = (stimulus_data[:, 1] * 10).astype(int)
+    
     trial_labels = {
         'category': stimulus_data[:, 0].astype(int),
-        'intensity': stimulus_data[:, 1].astype(int),
-        'combined': stimulus_data[:, 0] * 10 + stimulus_data[:, 1]  # 组合标签，例如11,10,21,20等
+        'intensity': intensity_mapped,
+        'combined': stimulus_data[:, 0].astype(int) * 100 + intensity_mapped  # 组合标签，例如100,102,105,110,200,202,205,210
     }
+    print(f"强度映射: {np.unique(stimulus_data[:, 1])} -> {np.unique(intensity_mapped)}")
+    print(f"组合标签: {np.unique(trial_labels['combined'])}")
     
     # 方法3: 创建连续标签用于CEBRA混合模式
     # 为每个时间点创建连续的"行为"标签，包含时间内信息
@@ -348,8 +353,8 @@ def prepare_cebra_data(segments, stimulus_data, rr_neurons=None, use_stimulus_on
         'discrete_label_data': {
             'neural_data': neural_timeseries.astype(np.float32),
             'category_labels': category_timeseries.astype(np.int32),
-            'intensity_labels': intensity_timeseries.astype(np.int32),
-            'combined_labels': (category_timeseries * 10 + intensity_timeseries).astype(np.int32),
+            'intensity_labels': (intensity_timeseries * 10).astype(np.int32),  # 映射强度
+            'combined_labels': (category_timeseries.astype(int) * 100 + (intensity_timeseries * 10).astype(int)).astype(np.int32),
             'trial_indices': trial_indices.astype(np.int32),
             'within_trial_time': within_trial_time.astype(np.int32)
         },
@@ -412,7 +417,9 @@ def save_cebra_data(cebra_data, base_path):
         neural_data=discrete_data['neural_data'],
         category_labels=discrete_data['category_labels'],
         intensity_labels=discrete_data['intensity_labels'],
-        combined_labels=discrete_data['combined_labels']
+        combined_labels=discrete_data['combined_labels'],
+        trial_indices=discrete_data['trial_indices'],
+        within_trial_time=discrete_data['within_trial_time']
     )
     print("✓ CEBRA-Behavior数据已保存")
     

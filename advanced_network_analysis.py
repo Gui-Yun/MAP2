@@ -941,7 +941,7 @@ def run_rich_club_analysis_by_condition(segments, labels, rr_neurons):
 
 def run_pid_analysis_by_condition(segments, labels, rr_neurons):
     """
-    按条件分别进行信息分解分析
+    跨条件进行信息分解分析（修正版本）
     
     参数:
     segments: 神经数据片段
@@ -949,42 +949,62 @@ def run_pid_analysis_by_condition(segments, labels, rr_neurons):
     rr_neurons: RR神经元索引
     
     返回:
-    condition_results: 各条件的信息分解分析结果
+    condition_results: 信息分解分析结果
     """
-    print("按条件进行信息分解（PID）分析...")
+    print("进行跨条件信息分解（PID）分析...")
     
     # 过滤有效数据
     valid_mask = labels != 0
     valid_segments = segments[valid_mask][:, rr_neurons, :]
     valid_labels = labels[valid_mask]
     
-    condition_results = {}
     unique_labels = np.unique(valid_labels)
+    print(f"发现标签类别: {unique_labels}")
     
-    for condition in unique_labels:
-        print(f"\n--- 分析条件 {condition} ---")
+    if len(unique_labels) < 2:
+        print("警告: 需要至少2个不同的标签类别进行信息分解分析")
+        return {}
+    
+    # 检查每个类别的试次数
+    label_counts = {}
+    for label in unique_labels:
+        count = np.sum(valid_labels == label)
+        label_counts[label] = count
+        print(f"标签 {label}: {count} 个试次")
+    
+    # 过滤掉试次数过少的标签
+    valid_labels_filtered = []
+    for label in unique_labels:
+        if label_counts[label] >= 10:  # 至少10个试次
+            valid_labels_filtered.append(label)
+    
+    if len(valid_labels_filtered) < 2:
+        print("警告: 每个类别至少需要10个试次进行信息分解分析")
+        return {}
+    
+    print(f"使用标签类别进行分析: {valid_labels_filtered}")
+    
+    # 只使用有足够试次的数据
+    analysis_mask = np.isin(valid_labels, valid_labels_filtered)
+    analysis_segments = valid_segments[analysis_mask]
+    analysis_labels = valid_labels[analysis_mask]
+    
+    print(f"分析数据维度: {analysis_segments.shape}")
+    print(f"分析标签分布: {dict(zip(*np.unique(analysis_labels, return_counts=True)))}")
+    
+    # 执行信息分解分析
+    pid_results = analyze_hub_peripheral_information_dynamics(
+        analysis_segments,
+        analysis_labels,
+        list(range(len(rr_neurons)))  # 使用连续索引
+    )
+    
+    condition_results = {}
+    if pid_results is not None:
+        condition_results['multi_condition'] = pid_results
         
-        # 提取该条件的数据
-        condition_mask = valid_labels == condition
-        condition_segments = valid_segments[condition_mask]
-        condition_labels = valid_labels[condition_mask]
-        
-        if len(condition_segments) < 20:
-            print(f"条件 {condition} 试次数不足，跳过")
-            continue
-        
-        # 执行信息分解分析
-        pid_results = analyze_hub_peripheral_information_dynamics(
-            condition_segments.reshape(len(condition_segments), len(rr_neurons), -1),
-            condition_labels,
-            list(range(len(rr_neurons)))  # 使用连续索引
-        )
-        
-        if pid_results is not None:
-            condition_results[condition] = pid_results
-            
-            # 保存结果
-            save_pid_analysis(pid_results, f"condition_{condition}")
+        # 保存结果
+        save_pid_analysis(pid_results, "multi_condition")
     
     return condition_results
 

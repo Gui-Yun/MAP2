@@ -3,7 +3,8 @@
     "allow": [
       "WebFetch(domain:cebra.ai)",
       "WebSearch",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Read(F:\\project\\202507OF/**)"
     ],
     "deny": [],
     "ask": []

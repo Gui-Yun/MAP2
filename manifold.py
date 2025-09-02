@@ -164,19 +164,29 @@ def get_color_by_intensity(category, intensity):
     
     return color
 
-def plot_manifold_2d(X_reduced, labels, stimulus_data, title="2D Manifold"):
+def save_manifold_2d_data(X_reduced, labels, stimulus_data, title="2D Manifold", save_dir="results"):
     """
-    绘制2D降维结果
+    保存2D降维结果数据
     
     参数:
     X_reduced: 降维后的2D数据
     labels: 类别标签（已过滤的有效标签）
     stimulus_data: 刺激数据（对应的有效试次数据）
-    title: 图标题
+    title: 数据标题
+    save_dir: 保存目录
     """
-    plt.figure(figsize=mfg.FIGURE_SIZE)
+    os.makedirs(save_dir, exist_ok=True)
     
-    # 按类别分别绘制
+    manifold_2d_data = {
+        'reduced_data': X_reduced,
+        'labels': labels,
+        'stimulus_data': stimulus_data,
+        'title': title,
+        'n_samples': X_reduced.shape[0],
+        'n_dimensions': X_reduced.shape[1]
+    }
+    
+    # 按类别和强度组织数据
     unique_labels = np.unique(labels)
     for label in unique_labels:
         mask = labels == label
@@ -186,7 +196,7 @@ def plot_manifold_2d(X_reduced, labels, stimulus_data, title="2D Manifold"):
         X_label = X_reduced[mask]
         stimulus_label = stimulus_data[mask]
         
-        # 按强度分别绘制
+        # 按强度分别保存
         intensities = np.unique(stimulus_label[:, 1])
         for intensity in intensities:
             intensity_mask = stimulus_label[:, 1] == intensity
@@ -196,38 +206,43 @@ def plot_manifold_2d(X_reduced, labels, stimulus_data, title="2D Manifold"):
             X_plot = X_label[intensity_mask]
             color = get_color_by_intensity(label, intensity)
             
-            label_name = f"Category {int(label)}"
-            if intensity == 1:
-                label_name += "_Noise"
-            
-            plt.scatter(X_plot[:, 0], X_plot[:, 1], 
-                       c=color, alpha=mfg.ALPHA, s=mfg.POINT_SIZE,
-                       label=label_name, edgecolors='black', linewidth=0.5)
+            key_name = f"category_{int(label)}_intensity_{intensity}"
+            manifold_2d_data[key_name] = {
+                'data': X_plot,
+                'color': color,
+                'n_samples': X_plot.shape[0]
+            }
     
-    plt.xlabel('Dimension 1')
-    plt.ylabel('Dimension 2')
-    plt.title(title)
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.show()
+    filename = title.replace(' ', '_').replace(':', '').lower() + '_2d_data.npz'
+    np.savez_compressed(
+        os.path.join(save_dir, filename),
+        **manifold_2d_data
+    )
+    print(f"2D降维数据已保存: {filename}")
 
-def plot_manifold_3d(X_reduced, labels, stimulus_data, title="3D Manifold"):
+def save_manifold_3d_data(X_reduced, labels, stimulus_data, title="3D Manifold", save_dir="results"):
     """
-    绘制3D降维结果
+    保存3D降维结果数据
     
     参数:
     X_reduced: 降维后的3D数据
     labels: 类别标签（已过滤的有效标签）
     stimulus_data: 刺激数据（对应的有效试次数据）
-    title: 图标题
+    title: 数据标题
+    save_dir: 保存目录
     """
-    from mpl_toolkits.mplot3d import Axes3D
+    os.makedirs(save_dir, exist_ok=True)
     
-    fig = plt.figure(figsize=mfg.FIGURE_SIZE)
-    ax = fig.add_subplot(111, projection='3d')
+    manifold_3d_data = {
+        'reduced_data': X_reduced,
+        'labels': labels,
+        'stimulus_data': stimulus_data,
+        'title': title,
+        'n_samples': X_reduced.shape[0],
+        'n_dimensions': X_reduced.shape[1]
+    }
     
-    # 按类别和强度绘制
+    # 按类别和强度组织数据
     unique_labels = np.unique(labels)
     for label in unique_labels:
         mask = labels == label
@@ -246,21 +261,19 @@ def plot_manifold_3d(X_reduced, labels, stimulus_data, title="3D Manifold"):
             X_plot = X_label[intensity_mask]
             color = get_color_by_intensity(label, intensity)
             
-            label_name = f"Category {int(label)}"
-            if intensity == 1:
-                label_name += "_Noise"
-            
-            ax.scatter(X_plot[:, 0], X_plot[:, 1], X_plot[:, 2],
-                      c=color, alpha=mfg.ALPHA, s=mfg.POINT_SIZE,
-                      label=label_name, edgecolors='black', linewidth=0.5)
+            key_name = f"category_{int(label)}_intensity_{intensity}"
+            manifold_3d_data[key_name] = {
+                'data': X_plot,
+                'color': color,
+                'n_samples': X_plot.shape[0]
+            }
     
-    ax.set_xlabel('Dimension 1')
-    ax.set_ylabel('Dimension 2')
-    ax.set_zlabel('Dimension 3')
-    ax.set_title(title)
-    ax.legend()
-    plt.tight_layout()
-    plt.show()
+    filename = title.replace(' ', '_').replace(':', '').lower() + '_3d_data.npz'
+    np.savez_compressed(
+        os.path.join(save_dir, filename),
+        **manifold_3d_data
+    )
+    print(f"3D降维数据已保存: {filename}")
 
 def prepare_cebra_data(segments, stimulus_data, rr_neurons=None, use_stimulus_only=True):
     """
@@ -617,20 +630,21 @@ if __name__ == "__main__":
     # t-SNE降维
     X_tsne = perform_tsne(X, n_components=2)
     
-    # %% 可视化
-    print("\n4. 可视化结果...")
+    # %% 保存降维结果数据
+    print("\n4. 保存降维结果数据...")
     
-    # 直接使用完整的刺激数据，不进行过滤
-    # stimulus_data包含所有trial的信息：第一列类别，第二列强度
+    # 创建结果保存目录
+    manifold_results_dir = os.path.join(cfg.DATA_PATH, 'results')
+    os.makedirs(manifold_results_dir, exist_ok=True)
     
-    # 绘制PCA 3D结果
-    plot_manifold_3d(X_pca, y, stimulus_data, title="PCA 3D Manifold")
+    # 保存PCA 3D结果数据
+    save_manifold_3d_data(X_pca, y, stimulus_data, title="PCA 3D Manifold", save_dir=manifold_results_dir)
     
-    # 绘制PCA 2D结果（前两个主成分）
-    plot_manifold_2d(X_pca[:, :2], y, stimulus_data, title="PCA 2D Manifold")
+    # 保存PCA 2D结果数据（前两个主成分）
+    save_manifold_2d_data(X_pca[:, :2], y, stimulus_data, title="PCA 2D Manifold", save_dir=manifold_results_dir)
     
-    # 绘制t-SNE 2D结果
-    plot_manifold_2d(X_tsne, y, stimulus_data, title="t-SNE 2D Manifold")
+    # 保存t-SNE 2D结果数据
+    save_manifold_2d_data(X_tsne, y, stimulus_data, title="t-SNE 2D Manifold", save_dir=manifold_results_dir)
     
     # %% 专业CEBRA数据准备和保存
     print("\n5. 准备CEBRA数据...")
@@ -650,14 +664,35 @@ if __name__ == "__main__":
     # %% 传统降维数据保存（向后兼容）
     print("\n6. 保存传统降维数据...")
     
-    # 保存降维结果和原始数据
-    save_dir = os.path.join(cfg.DATA_PATH, 'manifold_results')
-    os.makedirs(save_dir, exist_ok=True)
+    # 保存降维结果和原始数据到results目录
+    save_dir = os.path.join(cfg.DATA_PATH, 'results')
     
     # 保存PCA结果
     save_data_for_cebra(X_pca, y, os.path.join(save_dir, 'pca_data.npz'))
     
+    # 保存t-SNE结果
+    save_data_for_cebra(X_tsne, y, os.path.join(save_dir, 'tsne_data.npz'))
+    
     # 保存原始高维数据
-    save_data_for_cebra(X, y, os.path.join(save_dir, 'original_data.npz'))
+    save_data_for_cebra(X, y, os.path.join(save_dir, 'original_high_dim_data.npz'))
+    
+    # 保存降维分析统计信息
+    analysis_stats = {
+        'pca_explained_variance_ratio': pca.explained_variance_ratio_,
+        'pca_total_explained_variance': np.sum(pca.explained_variance_ratio_),
+        'pca_components': pca.components_,
+        'original_features': X.shape[1],
+        'pca_features': X_pca.shape[1],
+        'tsne_features': X_tsne.shape[1],
+        'n_samples': X.shape[0],
+        'rr_neurons': rr_neurons if rr_neurons is not None else 'all',
+        'n_rr_neurons': len(rr_neurons) if rr_neurons is not None else neural_data.shape[1]
+    }
+    
+    np.savez_compressed(
+        os.path.join(save_dir, 'manifold_analysis_stats.npz'),
+        **analysis_stats
+    )
+    print("降维分析统计信息已保存")
     
     print("\n=== 降维分析完成 ===")   

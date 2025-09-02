@@ -1,6 +1,5 @@
 # 神经数据预处理
 # guiy24@mails.tsinghua.edu.cn
-
 # %% 导入必要的库
 import h5py
 import os
@@ -30,7 +29,7 @@ class Config:
     """统一参数配置类"""
     
     # 数据路径
-    DATA_PATH = r'F:\brain\Micedata\M74_0816'
+    DATA_PATH = r'F:\brain\Micedata\M65_0816'
     
     # 触发文件处理参数
     IPD = 5                    # 刺激呈现时长(s)
@@ -79,9 +78,9 @@ class Config:
     NEURON_THRESHOLD = 1000   # 使用原始RR方法的神经元数量阈值
     
     # 试验范围（用于去掉首尾）
-    TRIAL_START_SKIP = 1     # 跳过开头的试验数
+    TRIAL_START_SKIP = 0     # 跳过开头的试验数
     TRIAL_END_SKIP = 0      # 跳过结尾的试验数
-    TOTAL_TRIALS = 180      # 保持的试验总数
+    TOTAL_TRIALS = 176      # 保持的试验总数
     
     # 预处理参数
     ENABLE_PREPROCESSING = True      # 是否启用预处理
@@ -101,6 +100,25 @@ class Config:
     
     # 分类器参数
     ENABLE_MULTIPLE_CLASSIFIERS = True  # 是否测试多种分类器
+    
+    # 可视化配置参数
+    VISUALIZATION_DPI = 300          # 图像分辨率
+    VISUALIZATION_STYLE = 'seaborn-v0_8-whitegrid'  # 科研绘图风格
+    COLOR_PALETTE = 'Set2'           # 配色方案
+    PLOT_COLORS = {
+        'primary': '#2E86AB',        # 主要颜色（蓝色）
+        'secondary': '#A23B72',      # 次要颜色（紫色）
+        'accent': '#F18F01',         # 强调色（橙色）
+        'success': '#C73E1D',        # 成功色（红色）
+        'neutral': '#6C757D',        # 中性色（灰色）
+        'background': '#F8F9FA'      # 背景色（浅灰）
+    }
+    
+    # 时间可视化参数
+    TIME_UNIT = 'frames'             # 时间单位标签
+    BASELINE_COLOR = '#95A5A6'       # 基线期颜色
+    STIMULUS_COLOR = '#E74C3C'       # 刺激期颜色  
+    RESPONSE_COLOR = '#3498DB'       # 响应期颜色
 
 # 全局配置实例
 cfg = Config()
@@ -560,71 +578,659 @@ def improved_classification(X, y, test_size=0.3, enable_multiple=True):
     }
 
 # %% ========== 可视化函数 ==========
-def plot_neuron_data(neuron_data, trigger_data, stimulus_data):
-    """可视化原始神经信号"""
-    plt.figure(figsize=cfg.FIGURE_SIZE_LARGE)
-    # 神经元数量太大，选择一些神经元
-    plt.plot(neuron_data.T, color='gray')
-    plt.title('Original Neuron Signals')
-    plt.xlabel('Time (frames)')
-    # 用红色虚线在trigger_data每个位置画竖直线
-    for t in trigger_data:
-        plt.axvline(x=t, color='red', linestyle='--', linewidth=1)
-    plt.ylabel('Neural Activity')
-    plt.show()
 
-def plot_simple_neuron(neuron_idx, trials_idx, segments):
-    """绘制单个神经元所有trial的平均神经活动"""
-    plt.figure(figsize=cfg.FIGURE_SIZE_TINY)
-    # 绘制所有的trial，颜色为浅灰色
-    for trial_idx in trials_idx:
-        plt.plot(segments[trial_idx, neuron_idx, :], label=f'Trial {trial_idx}')
-    # 绘制上面所有trial的平均发放，颜色为黑色，加粗
-    plt.plot(np.mean(segments[trials_idx, neuron_idx, :], axis=0), color='black', linewidth=2, label='Mean')
-    plt.title(f'Neuron {neuron_idx} Activity')
-    plt.xlabel('Time (frames)')
-    plt.ylabel('Neural Activity')
-    plt.legend()
-    plt.show()
+def setup_plot_style():
+    """设置科研绘图风格"""
+    plt.style.use(cfg.VISUALIZATION_STYLE)
+    plt.rcParams.update({
+        'font.size': 12,
+        'axes.titlesize': 14,
+        'axes.labelsize': 12,
+        'xtick.labelsize': 10,
+        'ytick.labelsize': 10,
+        'legend.fontsize': 11,
+        'figure.titlesize': 16,
+        'font.family': 'Arial',
+        'axes.spines.top': False,
+        'axes.spines.right': False,
+        'axes.linewidth': 1.2,
+        'axes.edgecolor': '#2C3E50',
+        'grid.alpha': 0.3
+    })
 
-def plot_rr_neurons_distribution(neuron_pos, rr_results):
-    """可视化RR神经元的空间分布"""
-    plt.figure(figsize=(15, 5))
+def visualize_classification_performance(results_dict, save_path=None):
+    """
+    Visualization of classification performance across different models
     
-    # 所有神经元位置
-    plt.subplot(1, 3, 1)
-    plt.scatter(neuron_pos[0, :], neuron_pos[1, :], c='lightgray', alpha=0.5, s=1)
-    plt.title(f'All Neurons (n={neuron_pos.shape[1]})')
-    plt.xlabel('X Coordinate')
-    plt.ylabel('Y Coordinate')
-    plt.axis('equal')
+    Parameters:
+    results_dict: Dictionary containing classification results
+    save_path: Path to save the figure
+    """
+    setup_plot_style()
     
-    # 响应性神经元位置
-    if len(rr_results['response_neurons']) > 0:
-        plt.subplot(1, 3, 2)
-        plt.scatter(neuron_pos[0, :], neuron_pos[1, :], c='lightgray', alpha=0.3, s=1)
-        response_idx = rr_results['response_neurons']
-        plt.scatter(neuron_pos[0, response_idx], neuron_pos[1, response_idx], 
-                   c='blue', alpha=0.7, s=3)
-        plt.title(f'Responsive Neurons (n={len(response_idx)})')
-        plt.xlabel('X Coordinate')
-        plt.ylabel('Y Coordinate')
-        plt.axis('equal')
-    
-    # RR神经元位置
-    if len(rr_results['rr_neurons']) > 0:
-        plt.subplot(1, 3, 3)
-        plt.scatter(neuron_pos[0, :], neuron_pos[1, :], c='lightgray', alpha=0.3, s=1)
-        rr_idx = rr_results['rr_neurons']
-        plt.scatter(neuron_pos[0, rr_idx], neuron_pos[1, rr_idx], 
-                   c='red', alpha=0.8, s=3)
-        plt.title(f'RR Neurons (n={len(rr_idx)})')
-        plt.xlabel('X Coordinate')
-        plt.ylabel('Y Coordinate')
-        plt.axis('equal')
+    if 'results' in results_dict:
+        # Multiple classifier results
+        models = list(results_dict['results'].keys())
+        accuracies = [results_dict['results'][model]['cv_mean'] for model in models]
+        stds = [results_dict['results'][model]['cv_std'] for model in models]
+        
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+        
+        # Bar plot of accuracies
+        colors = plt.cm.Set2(np.linspace(0, 1, len(models)))
+        bars = ax1.bar(models, accuracies, yerr=stds, capsize=5, 
+                      color=colors, alpha=0.8, edgecolor='black', linewidth=1.2)
+        
+        ax1.set_ylabel('Cross-validation Accuracy')
+        ax1.set_title('Model Performance Comparison')
+        ax1.set_ylim(0, max(accuracies) * 1.2)
+        ax1.tick_params(axis='x', rotation=45)
+        
+        # Add value labels on bars
+        for bar, acc, std in zip(bars, accuracies, stds):
+            ax1.text(bar.get_x() + bar.get_width()/2, bar.get_height() + std + 0.01,
+                    f'{acc:.3f}±{std:.3f}', ha='center', va='bottom', fontweight='bold')
+        
+        # Confusion matrix of best model
+        best_model = results_dict['best_model']
+        cm = results_dict['results'][best_model]['confusion_matrix']
+        
+        im = ax2.imshow(cm, interpolation='nearest', cmap='Blues', alpha=0.8)
+        ax2.figure.colorbar(im, ax=ax2, shrink=0.6)
+        
+        # Add text annotations
+        thresh = cm.max() / 2.
+        for i in range(cm.shape[0]):
+            for j in range(cm.shape[1]):
+                ax2.text(j, i, format(cm[i, j], 'd'),
+                        ha="center", va="center",
+                        color="white" if cm[i, j] > thresh else "black",
+                        fontweight='bold')
+        
+        ax2.set_ylabel('True Label')
+        ax2.set_xlabel('Predicted Label')
+        ax2.set_title(f'Confusion Matrix - {best_model}')
+        ax2.set_xticks(range(len(np.unique(cm))))
+        ax2.set_yticks(range(len(np.unique(cm))))
+        ax2.set_xticklabels([f'Class {i+1}' for i in range(len(np.unique(cm)))])
+        ax2.set_yticklabels([f'Class {i+1}' for i in range(len(np.unique(cm)))])
+        
+    else:
+        # Single model results
+        fig, ax = plt.subplots(1, 1, figsize=(8, 6))
+        cm = results_dict['confusion_matrix']
+        
+        im = ax.imshow(cm, interpolation='nearest', cmap='Blues', alpha=0.8)
+        fig.colorbar(im, ax=ax, shrink=0.8)
+        
+        thresh = cm.max() / 2.
+        for i in range(cm.shape[0]):
+            for j in range(cm.shape[1]):
+                ax.text(j, i, format(cm[i, j], 'd'),
+                       ha="center", va="center",
+                       color="white" if cm[i, j] > thresh else "black",
+                       fontweight='bold')
+        
+        ax.set_ylabel('True Label')
+        ax.set_xlabel('Predicted Label')
+        ax.set_title(f'Classification Results\nAccuracy: {results_dict["best_cv_mean"]:.3f}±{results_dict["best_cv_std"]:.3f}')
+        ax.set_xticks(range(cm.shape[1]))
+        ax.set_yticks(range(cm.shape[0]))
+        ax.set_xticklabels([f'Class {i+1}' for i in range(cm.shape[1])])
+        ax.set_yticklabels([f'Class {i+1}' for i in range(cm.shape[0])])
     
     plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=cfg.VISUALIZATION_DPI, bbox_inches='tight')
+        print(f"Classification performance plot saved to: {save_path}")
     plt.show()
+
+def visualize_roc_curves(X, y, models_dict, save_path=None):
+    """
+    Visualize ROC curves for multiple classifiers (binary or multiclass)
+    
+    Parameters:
+    X: Feature matrix
+    y: Labels
+    models_dict: Dictionary of trained models
+    save_path: Path to save the figure
+    """
+    from sklearn.model_selection import train_test_split
+    from sklearn.metrics import roc_curve, auc
+    from sklearn.preprocessing import label_binarize
+    from scipy import interp
+    from itertools import cycle
+    
+    setup_plot_style()
+    
+    # Split data
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.3, random_state=cfg.RANDOM_STATE, stratify=y)
+    
+    unique_classes = np.unique(y)
+    n_classes = len(unique_classes)
+    
+    if n_classes == 2:
+        # Binary classification
+        fig, ax = plt.subplots(figsize=(8, 8))
+        
+        colors = cycle(['aqua', 'darkorange', 'cornflowerblue', 'red', 'green'])
+        
+        for (name, model), color in zip(models_dict.items(), colors):
+            model.fit(X_train, y_train)
+            if hasattr(model, "decision_function"):
+                y_score = model.decision_function(X_test)
+            else:
+                y_score = model.predict_proba(X_test)[:, 1]
+            
+            fpr, tpr, _ = roc_curve(y_test, y_score)
+            roc_auc = auc(fpr, tpr)
+            
+            ax.plot(fpr, tpr, color=color, lw=2,
+                   label=f'{name} (AUC = {roc_auc:.2f})')
+        
+        ax.plot([0, 1], [0, 1], 'k--', lw=2, label='Random Classifier')
+        ax.set_xlim([0.0, 1.0])
+        ax.set_ylim([0.0, 1.05])
+        ax.set_xlabel('False Positive Rate')
+        ax.set_ylabel('True Positive Rate')
+        ax.set_title('Receiver Operating Characteristic (ROC) Curves')
+        ax.legend(loc="lower right")
+        
+    else:
+        # Multiclass classification - show one-vs-rest ROC
+        fig, ax = plt.subplots(figsize=(10, 8))
+        
+        # Binarize the output
+        y_test_bin = label_binarize(y_test, classes=unique_classes)
+        
+        # Plot ROC curve for each class for the best model
+        best_model_name = list(models_dict.keys())[0]  # Use first model
+        best_model = models_dict[best_model_name]
+        best_model.fit(X_train, y_train)
+        y_score = best_model.predict_proba(X_test)
+        
+        colors = cycle(['aqua', 'darkorange', 'cornflowerblue', 'red', 'green'])
+        
+        for i, color in zip(range(n_classes), colors):
+            fpr, tpr, _ = roc_curve(y_test_bin[:, i], y_score[:, i])
+            roc_auc = auc(fpr, tpr)
+            ax.plot(fpr, tpr, color=color, lw=2,
+                   label=f'Class {unique_classes[i]} (AUC = {roc_auc:.2f})')
+        
+        ax.plot([0, 1], [0, 1], 'k--', lw=2, label='Random Classifier')
+        ax.set_xlim([0.0, 1.0])
+        ax.set_ylim([0.0, 1.05])
+        ax.set_xlabel('False Positive Rate')
+        ax.set_ylabel('True Positive Rate')
+        ax.set_title(f'ROC Curves - {best_model_name} (One-vs-Rest)')
+        ax.legend(loc="lower right")
+    
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=cfg.VISUALIZATION_DPI, bbox_inches='tight')
+        print(f"ROC curves saved to: {save_path}")
+    plt.show()
+
+def visualize_neural_activity_heatmap(neuron_data, title="Neural Activity Heatmap", 
+                                     max_neurons=50, save_path=None):
+    """
+    Visualize neural activity as a professional heatmap
+    
+    Parameters:
+    neuron_data: Neural data array (timepoints, neurons)
+    title: Plot title
+    max_neurons: Maximum number of neurons to display
+    save_path: Path to save the figure
+    """
+    setup_plot_style()
+    
+    # Select neurons for display
+    n_neurons_display = min(max_neurons, neuron_data.shape[1])
+    if n_neurons_display < neuron_data.shape[1]:
+        selected_neurons = np.linspace(0, neuron_data.shape[1]-1, n_neurons_display, dtype=int)
+    else:
+        selected_neurons = np.arange(n_neurons_display)
+    
+    # Select time points for display  
+    max_timepoints = 800
+    n_timepoints_display = min(max_timepoints, neuron_data.shape[0])
+    time_indices = np.linspace(0, neuron_data.shape[0]-1, n_timepoints_display, dtype=int)
+    
+    # Create heatmap data
+    heatmap_data = neuron_data[np.ix_(time_indices, selected_neurons)].T
+    
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 10), height_ratios=[3, 1])
+    
+    # Main heatmap
+    im = ax1.imshow(heatmap_data, aspect='auto', cmap='viridis', 
+                    interpolation='nearest', alpha=0.9)
+    
+    # Colorbar
+    cbar = fig.colorbar(im, ax=ax1, shrink=0.8)
+    cbar.set_label('Neural Activity (ΔF/F)', rotation=270, labelpad=20)
+    
+    ax1.set_xlabel(f'Time ({cfg.TIME_UNIT})')
+    ax1.set_ylabel('Neurons')
+    ax1.set_title(f'{title}\nDisplaying {n_neurons_display} neurons over {n_timepoints_display} time points')
+    
+    # Set ticks
+    n_ticks_time = 8
+    time_tick_indices = np.linspace(0, len(time_indices)-1, n_ticks_time, dtype=int)
+    ax1.set_xticks(time_tick_indices)
+    ax1.set_xticklabels([f'{time_indices[i]}' for i in time_tick_indices])
+    
+    n_ticks_neurons = min(8, n_neurons_display)
+    neuron_tick_indices = np.linspace(0, n_neurons_display-1, n_ticks_neurons, dtype=int)
+    ax1.set_yticks(neuron_tick_indices)
+    ax1.set_yticklabels([f'N{selected_neurons[i]}' for i in neuron_tick_indices])
+    
+    # Activity profile over time
+    mean_activity = np.mean(heatmap_data, axis=0)
+    ax2.plot(range(len(mean_activity)), mean_activity, 
+             linewidth=2, color=cfg.PLOT_COLORS['primary'], alpha=0.8)
+    ax2.fill_between(range(len(mean_activity)), mean_activity, 
+                     alpha=0.3, color=cfg.PLOT_COLORS['primary'])
+    
+    ax2.set_xlabel(f'Time ({cfg.TIME_UNIT})')
+    ax2.set_ylabel('Mean Activity')
+    ax2.set_title('Average Neural Activity Over Time')
+    ax2.grid(True, alpha=0.3)
+    
+    # Set x-ticks for activity profile
+    ax2.set_xticks(time_tick_indices)
+    ax2.set_xticklabels([f'{time_indices[i]}' for i in time_tick_indices])
+    
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=cfg.VISUALIZATION_DPI, bbox_inches='tight')
+        print(f"Neural activity heatmap saved to: {save_path}")
+    plt.show()
+
+def visualize_trigger_distribution(trigger_data, title="Stimulus Trigger Distribution", save_path=None):
+    """
+    Visualize stimulus trigger temporal distribution with professional styling
+    
+    Parameters:
+    trigger_data: Array of trigger time points
+    title: Plot title
+    save_path: Path to save the figure
+    """
+    setup_plot_style()
+    
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    
+    # 1. Trigger interval distribution
+    ax1 = axes[0, 0]
+    if len(trigger_data) > 1:
+        intervals = np.diff(trigger_data)
+        n_bins = min(20, len(intervals)//3)
+        
+        counts, bins, patches = ax1.hist(intervals, bins=n_bins, alpha=0.7, 
+                                        color=cfg.PLOT_COLORS['primary'], 
+                                        edgecolor='black', linewidth=1.2)
+        
+        # Add statistics
+        mean_interval = np.mean(intervals)
+        std_interval = np.std(intervals)
+        ax1.axvline(mean_interval, color=cfg.PLOT_COLORS['accent'], linestyle='--', 
+                   linewidth=2, alpha=0.8, label=f'Mean: {mean_interval:.1f}')
+        
+        ax1.set_xlabel(f'Inter-trigger Interval ({cfg.TIME_UNIT})')
+        ax1.set_ylabel('Frequency')
+        ax1.set_title(f'Trigger Interval Distribution\nMean: {mean_interval:.1f} ± {std_interval:.1f}')
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+    
+    # 2. Trigger timing over experiment
+    ax2 = axes[0, 1]
+    ax2.scatter(trigger_data, np.ones_like(trigger_data), 
+               s=50, c=cfg.PLOT_COLORS['secondary'], alpha=0.7, 
+               edgecolors='black', linewidth=0.5)
+    ax2.set_xlabel(f'Time ({cfg.TIME_UNIT})')
+    ax2.set_ylabel('Trigger Events')
+    ax2.set_title(f'Trigger Time Points\nTotal: {len(trigger_data)} triggers')
+    ax2.grid(True, alpha=0.3)
+    ax2.set_ylim([0.5, 1.5])
+    ax2.set_yticks([1])
+    ax2.set_yticklabels(['Triggers'])
+    
+    # 3. Cumulative trigger count
+    ax3 = axes[1, 0]
+    cumulative_count = np.arange(1, len(trigger_data) + 1)
+    ax3.plot(trigger_data, cumulative_count, linewidth=2.5, 
+            color=cfg.PLOT_COLORS['success'], alpha=0.8, marker='o', markersize=3)
+    ax3.fill_between(trigger_data, cumulative_count, alpha=0.3, 
+                    color=cfg.PLOT_COLORS['success'])
+    
+    ax3.set_xlabel(f'Time ({cfg.TIME_UNIT})')
+    ax3.set_ylabel('Cumulative Trigger Count')
+    ax3.set_title('Cumulative Trigger Timeline')
+    ax3.grid(True, alpha=0.3)
+    
+    # 4. Trigger rate over time (sliding window)
+    ax4 = axes[1, 1]
+    if len(trigger_data) > 5:
+        window_size = max(5, len(trigger_data) // 10)
+        trigger_rates = []
+        window_centers = []
+        
+        for i in range(window_size, len(trigger_data) - window_size):
+            window_triggers = trigger_data[i-window_size:i+window_size]
+            if len(window_triggers) > 1:
+                rate = len(window_triggers) / (window_triggers[-1] - window_triggers[0])
+                trigger_rates.append(rate)
+                window_centers.append(trigger_data[i])
+        
+        if trigger_rates:
+            ax4.plot(window_centers, trigger_rates, linewidth=2, 
+                    color=cfg.PLOT_COLORS['primary'], alpha=0.8, marker='s', markersize=4)
+            ax4.set_xlabel(f'Time ({cfg.TIME_UNIT})')
+            ax4.set_ylabel('Trigger Rate (Hz)')
+            ax4.set_title('Trigger Rate Over Time')
+            ax4.grid(True, alpha=0.3)
+    
+    plt.suptitle(title, y=0.98)
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=cfg.VISUALIZATION_DPI, bbox_inches='tight')
+        print(f"Trigger distribution plot saved to: {save_path}")
+    plt.show()
+
+def visualize_stimulus_data_distribution(stimulus_data, title="Stimulus Data Distribution", save_path=None):
+    """
+    Visualize stimulus data distribution with professional styling
+    
+    Parameters:
+    stimulus_data: Stimulus data array (trials, features)
+    title: Plot title
+    save_path: Path to save the figure
+    """
+    setup_plot_style()
+    
+    fig = plt.figure(figsize=(16, 12))
+    gs = fig.add_gridspec(3, 3, height_ratios=[1, 1, 1])
+    
+    # Extract data
+    categories = stimulus_data[:, 0]
+    intensities = stimulus_data[:, 1]
+    
+    # 1. Category distribution
+    ax1 = fig.add_subplot(gs[0, 0])
+    unique_cats, counts_cats = np.unique(categories, return_counts=True)
+    colors_cat = plt.cm.Set2(np.linspace(0, 1, len(unique_cats)))
+    
+    bars1 = ax1.bar(unique_cats, counts_cats, alpha=0.8, 
+                   color=colors_cat, edgecolor='black', linewidth=1.2)
+    
+    # Add value labels
+    for bar, count in zip(bars1, counts_cats):
+        ax1.text(bar.get_x() + bar.get_width()/2, bar.get_height() + max(counts_cats) * 0.01,
+               str(count), ha='center', va='bottom', fontweight='bold')
+    
+    ax1.set_xlabel('Stimulus Category')
+    ax1.set_ylabel('Frequency')
+    ax1.set_title('Category Distribution')
+    ax1.grid(True, alpha=0.3)
+    
+    # 2. Intensity distribution
+    ax2 = fig.add_subplot(gs[0, 1])
+    unique_ints, counts_ints = np.unique(intensities, return_counts=True)
+    colors_int = plt.cm.viridis(np.linspace(0, 1, len(unique_ints)))
+    
+    bars2 = ax2.bar(unique_ints, counts_ints, alpha=0.8,
+                   color=colors_int, edgecolor='black', linewidth=1.2)
+    
+    for bar, count in zip(bars2, counts_ints):
+        ax2.text(bar.get_x() + bar.get_width()/2, bar.get_height() + max(counts_ints) * 0.01,
+               str(count), ha='center', va='bottom', fontweight='bold')
+    
+    ax2.set_xlabel('Stimulus Intensity')
+    ax2.set_ylabel('Frequency')
+    ax2.set_title('Intensity Distribution')
+    ax2.grid(True, alpha=0.3)
+    
+    # 3. Category-Intensity combination
+    ax3 = fig.add_subplot(gs[0, 2])
+    combinations = list(zip(categories, intensities))
+    unique_combs, counts_combs = np.unique(combinations, return_counts=True, axis=0)
+    
+    comb_labels = [f"C{int(c[0])}-I{c[1]}" for c in unique_combs]
+    colors_comb = plt.cm.tab10(np.linspace(0, 1, len(comb_labels)))
+    
+    bars3 = ax3.bar(range(len(comb_labels)), counts_combs, alpha=0.8,
+                   color=colors_comb, edgecolor='black', linewidth=1.2)
+    
+    for bar, count in zip(bars3, counts_combs):
+        ax3.text(bar.get_x() + bar.get_width()/2, bar.get_height() + max(counts_combs) * 0.01,
+               str(count), ha='center', va='bottom', fontweight='bold')
+    
+    ax3.set_xlabel('Category-Intensity Combination')
+    ax3.set_ylabel('Frequency')  
+    ax3.set_title('Category-Intensity Distribution')
+    ax3.set_xticks(range(len(comb_labels)))
+    ax3.set_xticklabels(comb_labels, rotation=45, ha='right')
+    ax3.grid(True, alpha=0.3)
+    
+    # 4. Time series of categories
+    ax4 = fig.add_subplot(gs[1, :])
+    trial_indices = np.arange(len(categories))
+    
+    # Plot categories as colored segments
+    for i, cat in enumerate(unique_cats):
+        cat_mask = categories == cat
+        cat_trials = trial_indices[cat_mask]
+        ax4.scatter(cat_trials, np.full_like(cat_trials, cat), 
+                   c=colors_cat[i], s=40, alpha=0.7, 
+                   edgecolors='black', linewidth=0.5, label=f'Category {int(cat)}')
+    
+    ax4.set_xlabel('Trial Index')
+    ax4.set_ylabel('Stimulus Category')
+    ax4.set_title('Stimulus Category Sequence Over Trials')
+    ax4.legend(loc='upper right')
+    ax4.grid(True, alpha=0.3)
+    ax4.set_yticks(unique_cats)
+    
+    # 5. Intensity time series
+    ax5 = fig.add_subplot(gs[2, :])
+    for i, intensity in enumerate(unique_ints):
+        int_mask = intensities == intensity
+        int_trials = trial_indices[int_mask]
+        ax5.scatter(int_trials, np.full_like(int_trials, intensity),
+                   c=colors_int[i], s=40, alpha=0.7,
+                   edgecolors='black', linewidth=0.5, label=f'Intensity {intensity}')
+    
+    ax5.set_xlabel('Trial Index')
+    ax5.set_ylabel('Stimulus Intensity')
+    ax5.set_title('Stimulus Intensity Sequence Over Trials')
+    ax5.legend(loc='upper right')
+    ax5.grid(True, alpha=0.3)
+    ax5.set_yticks(unique_ints)
+    
+    plt.suptitle(title, y=0.98)
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=cfg.VISUALIZATION_DPI, bbox_inches='tight')
+        print(f"Stimulus distribution plot saved to: {save_path}")
+    plt.show()
+
+def visualize_rr_neurons_spatial_distribution(neuron_pos, rr_results, save_path=None):
+    """
+    Visualize spatial distribution of RR neurons
+    
+    Parameters:
+    neuron_pos: Neuron positions array (2, n_neurons)
+    rr_results: RR neuron selection results
+    save_path: Path to save the figure
+    """
+    setup_plot_style()
+    
+    fig, axes = plt.subplots(2, 2, figsize=(14, 12))
+    
+    # All neurons spatial distribution
+    ax1 = axes[0, 0]
+    ax1.scatter(neuron_pos[0, :], neuron_pos[1, :], 
+               c=cfg.PLOT_COLORS['neutral'], s=20, alpha=0.5, 
+               edgecolors='black', linewidths=0.3, label='All Neurons')
+    
+    ax1.set_xlabel('X Position (μm)')
+    ax1.set_ylabel('Y Position (μm)')
+    ax1.set_title(f'All Neurons Spatial Distribution\n(N = {neuron_pos.shape[1]})')
+    ax1.legend()
+    ax1.grid(True, alpha=0.3)
+    ax1.set_aspect('equal', adjustable='box')
+    
+    # RR neurons highlighted
+    ax2 = axes[0, 1]
+    ax2.scatter(neuron_pos[0, :], neuron_pos[1, :], 
+               c=cfg.PLOT_COLORS['neutral'], s=15, alpha=0.3, 
+               edgecolors='none', label='All Neurons')
+    
+    if len(rr_results['rr_neurons']) > 0:
+        rr_pos = neuron_pos[:, rr_results['rr_neurons']]
+        ax2.scatter(rr_pos[0, :], rr_pos[1, :], 
+                   c=cfg.PLOT_COLORS['accent'], s=40, alpha=0.8,
+                   edgecolors='black', linewidths=0.5, label='RR Neurons')
+    
+    ax2.set_xlabel('X Position (μm)')
+    ax2.set_ylabel('Y Position (μm)')
+    ax2.set_title(f'RR Neurons Spatial Distribution\n(N = {len(rr_results["rr_neurons"])})')
+    ax2.legend()
+    ax2.grid(True, alpha=0.3)
+    ax2.set_aspect('equal', adjustable='box')
+    
+    # Response vs non-response neurons
+    ax3 = axes[1, 0]
+    non_response_neurons = list(set(range(neuron_pos.shape[1])) - set(rr_results['response_neurons']))
+    
+    if non_response_neurons:
+        ax3.scatter(neuron_pos[0, non_response_neurons], neuron_pos[1, non_response_neurons],
+                   c=cfg.PLOT_COLORS['neutral'], s=15, alpha=0.4,
+                   edgecolors='none', label='Non-responsive')
+    
+    if len(rr_results['response_neurons']) > 0:
+        resp_pos = neuron_pos[:, rr_results['response_neurons']]
+        ax3.scatter(resp_pos[0, :], resp_pos[1, :],
+                   c=cfg.PLOT_COLORS['primary'], s=25, alpha=0.7,
+                   edgecolors='black', linewidths=0.3, label='Responsive')
+    
+    ax3.set_xlabel('X Position (μm)')
+    ax3.set_ylabel('Y Position (μm)')
+    ax3.set_title(f'Responsive vs Non-responsive Neurons\n(Responsive: {len(rr_results["response_neurons"])})')
+    ax3.legend()
+    ax3.grid(True, alpha=0.3)
+    ax3.set_aspect('equal', adjustable='box')
+    
+    # Summary statistics
+    ax4 = axes[1, 1]
+    categories = ['Total', 'Responsive', 'Reliable', 'RR Neurons']
+    counts = [
+        neuron_pos.shape[1],
+        len(rr_results['response_neurons']),
+        len(rr_results['reliable_neurons']),
+        len(rr_results['rr_neurons'])
+    ]
+    
+    colors = [cfg.PLOT_COLORS['neutral'], cfg.PLOT_COLORS['primary'], 
+              cfg.PLOT_COLORS['secondary'], cfg.PLOT_COLORS['accent']]
+    
+    bars = ax4.bar(categories, counts, alpha=0.8, color=colors, 
+                   edgecolor='black', linewidth=1.2)
+    
+    # Add percentage labels
+    total_neurons = neuron_pos.shape[1]
+    for bar, count in zip(bars, counts):
+        percentage = (count / total_neurons) * 100 if total_neurons > 0 else 0
+        ax4.text(bar.get_x() + bar.get_width()/2, bar.get_height() + max(counts) * 0.01,
+                f'{count}\n({percentage:.1f}%)', ha='center', va='bottom', fontweight='bold')
+    
+    ax4.set_ylabel('Number of Neurons')
+    ax4.set_title('Neuron Selection Summary')
+    ax4.grid(True, axis='y', alpha=0.3)
+    
+    plt.suptitle('RR Neurons Spatial Analysis', y=0.98)
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=cfg.VISUALIZATION_DPI, bbox_inches='tight')
+        print(f"RR neurons spatial distribution saved to: {save_path}")
+    plt.show()
+
+def save_neuron_activity_stats(neuron_data, trigger_data, save_dir='results'):
+    """保存神经信号基本统计信息"""
+    os.makedirs(save_dir, exist_ok=True)
+    
+    stats = {
+        'n_neurons': neuron_data.shape[1],
+        'n_timepoints': neuron_data.shape[0],
+        'mean_activity': np.mean(neuron_data),
+        'std_activity': np.std(neuron_data),
+        'min_activity': np.min(neuron_data),
+        'max_activity': np.max(neuron_data),
+        'trigger_times': trigger_data,
+        'n_triggers': len(trigger_data)
+    }
+    
+    np.savez_compressed(
+        os.path.join(save_dir, 'neuron_activity_stats.npz'),
+        **stats
+    )
+    print(f"神经活动统计信息已保存到 {save_dir}/neuron_activity_stats.npz")
+
+def save_single_neuron_stats(neuron_idx, trials_idx, segments, save_dir='results'):
+    """保存单个神经元的统计信息"""
+    os.makedirs(save_dir, exist_ok=True)
+    
+    neuron_data = segments[trials_idx, neuron_idx, :]
+    mean_response = np.mean(neuron_data, axis=0)
+    
+    stats = {
+        'neuron_idx': neuron_idx,
+        'trials_used': trials_idx,
+        'mean_response': mean_response,
+        'std_response': np.std(neuron_data, axis=0),
+        'trial_responses': neuron_data,
+        'peak_time': np.argmax(mean_response),
+        'peak_value': np.max(mean_response),
+        'baseline_mean': np.mean(mean_response[:cfg.PRE_FRAMES]),
+        'response_mean': np.mean(mean_response[cfg.PRE_FRAMES:cfg.PRE_FRAMES+cfg.STIMULUS_DURATION])
+    }
+    
+    np.savez_compressed(
+        os.path.join(save_dir, f'neuron_{neuron_idx}_stats.npz'),
+        **stats
+    )
+    print(f"神经元 {neuron_idx} 统计信息已保存")
+
+def save_rr_neurons_distribution(neuron_pos, rr_results, save_dir='results'):
+    """保存RR神经元的空间分布统计"""
+    os.makedirs(save_dir, exist_ok=True)
+    
+    distribution_stats = {
+        'total_neurons': neuron_pos.shape[1],
+        'neuron_positions': neuron_pos,
+        'response_neurons': rr_results['response_neurons'],
+        'rr_neurons': rr_results['rr_neurons'],
+        'n_response_neurons': len(rr_results['response_neurons']),
+        'n_rr_neurons': len(rr_results['rr_neurons']),
+        'rr_ratio': len(rr_results['rr_neurons']) / neuron_pos.shape[1] if neuron_pos.shape[1] > 0 else 0
+    }
+    
+    # 计算RR神经元的空间分布统计
+    if len(rr_results['rr_neurons']) > 0:
+        rr_positions = neuron_pos[:, rr_results['rr_neurons']]
+        distribution_stats.update({
+            'rr_positions': rr_positions,
+            'rr_center_x': np.mean(rr_positions[0, :]),
+            'rr_center_y': np.mean(rr_positions[1, :]),
+            'rr_spread_x': np.std(rr_positions[0, :]),
+            'rr_spread_y': np.std(rr_positions[1, :])
+        })
+    
+    np.savez_compressed(
+        os.path.join(save_dir, 'rr_neurons_distribution.npz'),
+        **distribution_stats
+    )
+    print(f"RR神经元分布统计信息已保存到 {save_dir}/rr_neurons_distribution.npz")
 
 # %% ========== 数据分割函数 ==========
 def segment_neuron_data(neuron_data, trigger_data, stimulus_data, pre_frames=cfg.PRE_FRAMES, post_frames=cfg.POST_FRAMES, baseline_correct=cfg.BASELINE_CORRECT):
@@ -838,10 +1444,10 @@ def classify_by_timepoints(segments, labels, rr_neurons, pre_frames=cfg.PRE_FRAM
     
     return np.array(accuracies), np.array(time_points)
 
-def plot_accuracy_over_time(accuracies, time_points, pre_frames=cfg.PRE_FRAMES, 
-                           stimulus_duration=cfg.STIMULUS_DURATION):
+def save_accuracy_over_time(accuracies, time_points, pre_frames=cfg.PRE_FRAMES, 
+                           stimulus_duration=cfg.STIMULUS_DURATION, save_dir='results'):
     """
-    绘制准确率随时间变化的曲线
+    保存准确率随时间变化的数据和统计信息
     
     参数:
     accuracies: 准确率数组
@@ -849,56 +1455,303 @@ def plot_accuracy_over_time(accuracies, time_points, pre_frames=cfg.PRE_FRAMES,
     pre_frames: 刺激前帧数
     stimulus_duration: 刺激持续时间
     """
-    plt.figure(figsize=cfg.FIGURE_SIZE_MEDIUM)
+    os.makedirs(save_dir, exist_ok=True)
     
-    # 绘制准确率曲线
-    plt.plot(time_points, accuracies, 'b-', linewidth=2, label='Classification Accuracy')
-    
-    # 添加刺激期标识
     stimulus_start = pre_frames
     stimulus_end = pre_frames + stimulus_duration
     
-    # 标记刺激开始和结束
-    plt.axvline(x=stimulus_start, color='red', linestyle='--', alpha=0.7, label='Stimulus Start')
-    plt.axvline(x=stimulus_end, color='red', linestyle=':', alpha=0.7, label='Stimulus End')
-    
-    # 添加刺激期背景
-    plt.axvspan(stimulus_start, stimulus_end, alpha=0.2, color='red', label='Stimulus Period')
-    
-    # 添加基线参考线
-    baseline_acc = 1.0 / len(np.unique([1, 2, 3]))  # 假设3类分类的随机准确率
-    plt.axhline(y=baseline_acc, color='gray', linestyle='-', alpha=0.5, label=f'Chance Level ({baseline_acc:.3f})')
-    
-    # 设置图形属性
-    plt.xlabel('Time Point (frames)')
-    plt.ylabel('Classification Accuracy')
-    plt.title('Classification Accuracy Over Time Within Trials')
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    
-    # 添加时间轴标签
-    plt.xticks(np.arange(0, max(time_points)+1, 10))
-    
-    # 显示最高准确率点
+    # 计算统计信息
     max_acc_idx = np.argmax(accuracies)
     max_time = time_points[max_acc_idx]
     max_acc = accuracies[max_acc_idx]
     
-    plt.plot(max_time, max_acc, 'ro', markersize=8)
-    plt.annotate(f'Peak: {max_acc:.3f}@t={max_time}', 
-                xy=(max_time, max_acc), xytext=(max_time+5, max_acc+0.02),
-                arrowprops=dict(arrowstyle='->', color='red', alpha=0.7))
+    baseline_acc = np.mean(accuracies[:pre_frames]) if pre_frames > 0 else 0
+    stimulus_acc = np.mean(accuracies[stimulus_start:stimulus_end])
+    response_acc = np.mean(accuracies[stimulus_end:]) if stimulus_end < len(accuracies) else 0
     
-    plt.tight_layout()
-    plt.show()
+    time_stats = {
+        'time_points': time_points,
+        'accuracies': accuracies,
+        'stimulus_start': stimulus_start,
+        'stimulus_end': stimulus_end,
+        'baseline_accuracy': baseline_acc,
+        'stimulus_accuracy': stimulus_acc,
+        'response_accuracy': response_acc,
+        'max_accuracy': max_acc,
+        'max_time': max_time,
+        'overall_mean': np.mean(accuracies),
+        'overall_std': np.std(accuracies),
+        'chance_level': 1.0 / 3  # 3类分类
+    }
+    
+    np.savez_compressed(
+        os.path.join(save_dir, 'accuracy_over_time.npz'),
+        **time_stats
+    )
     
     # 打印关键统计信息
     print(f"\n=== 时间点分类分析结果 ===")
-    print(f"基线期平均准确率: {np.mean(accuracies[:pre_frames]):.3f}")
-    print(f"刺激期平均准确率: {np.mean(accuracies[stimulus_start:stimulus_end]):.3f}")
-    print(f"响应期平均准确率: {np.mean(accuracies[stimulus_end:]):.3f}")
+    print(f"基线期平均准确率: {baseline_acc:.3f}")
+    print(f"刺激期平均准确率: {stimulus_acc:.3f}")
+    print(f"响应期平均准确率: {response_acc:.3f}")
     print(f"最高准确率: {max_acc:.3f} (时间点 {max_time})")
     print(f"整体平均准确率: {np.mean(accuracies):.3f} ± {np.std(accuracies):.3f}")
+    print(f"时间点分类结果已保存到 {save_dir}/accuracy_over_time.npz")
+
+def visualize_accuracy_over_time(accuracies, time_points=None, 
+                               pre_frames=cfg.PRE_FRAMES, stimulus_duration=cfg.STIMULUS_DURATION,
+                               chance_level=1/3, save_path=None):
+    """
+    Visualize classification accuracy over time
+    
+    Parameters:
+    accuracies: Array of accuracy scores
+    time_points: Time point array  
+    pre_frames: Number of baseline frames
+    stimulus_duration: Duration of stimulus in frames
+    chance_level: Random chance level
+    save_path: Path to save the figure
+    """
+    setup_plot_style()
+    
+    if time_points is None:
+        time_points = np.arange(len(accuracies))
+    
+    stimulus_start = pre_frames
+    stimulus_end = pre_frames + stimulus_duration
+    
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))
+    
+    # Main accuracy plot
+    ax1.plot(time_points, accuracies, linewidth=2.5, color=cfg.PLOT_COLORS['primary'], 
+             alpha=0.8, label='Classification Accuracy')
+    
+    # Add chance level
+    ax1.axhline(chance_level, color=cfg.PLOT_COLORS['neutral'], linestyle='--', 
+               linewidth=1.5, alpha=0.7, label=f'Chance Level ({chance_level:.3f})')
+    
+    # Add baseline and stimulus periods
+    ax1.axvspan(0, stimulus_start, alpha=0.2, color=cfg.BASELINE_COLOR, 
+               label='Baseline Period')
+    ax1.axvspan(stimulus_start, stimulus_end, alpha=0.2, color=cfg.STIMULUS_COLOR, 
+               label='Stimulus Period')
+    ax1.axvspan(stimulus_end, len(time_points), alpha=0.2, color=cfg.RESPONSE_COLOR, 
+               label='Response Period')
+    
+    # Mark peak
+    max_idx = np.argmax(accuracies)
+    max_time = time_points[max_idx]
+    max_acc = accuracies[max_idx]
+    ax1.plot(max_time, max_acc, 'o', markersize=8, color=cfg.PLOT_COLORS['accent'], 
+             markeredgecolor='black', markeredgewidth=1.5, 
+             label=f'Peak: {max_acc:.3f} at t={max_time}')
+    
+    ax1.set_xlabel(f'Time ({cfg.TIME_UNIT})')
+    ax1.set_ylabel('Classification Accuracy')
+    ax1.set_title('Classification Accuracy Over Time')
+    ax1.set_ylim([0, max(1.0, max(accuracies) * 1.1)])
+    ax1.legend(loc='upper right')
+    ax1.grid(True, alpha=0.3)
+    
+    # Period-wise comparison
+    periods = ['Baseline', 'Stimulus', 'Response']
+    
+    # Calculate period averages
+    baseline_acc = np.mean(accuracies[:pre_frames]) if pre_frames > 0 else 0
+    stimulus_acc = np.mean(accuracies[stimulus_start:stimulus_end])
+    response_acc = np.mean(accuracies[stimulus_end:]) if stimulus_end < len(accuracies) else 0
+    
+    period_values = [baseline_acc, stimulus_acc, response_acc]
+    period_colors = [cfg.BASELINE_COLOR, cfg.STIMULUS_COLOR, cfg.RESPONSE_COLOR]
+    
+    bars = ax2.bar(periods, period_values, color=period_colors, alpha=0.7, 
+                   edgecolor='black', linewidth=1.2)
+    
+    # Add chance level line
+    ax2.axhline(chance_level, color=cfg.PLOT_COLORS['neutral'], linestyle='--', 
+               linewidth=1.5, alpha=0.7, label=f'Chance Level')
+    
+    # Add value labels
+    for bar, value in zip(bars, period_values):
+        ax2.text(bar.get_x() + bar.get_width()/2, bar.get_height() + max(period_values) * 0.02,
+                f'{value:.3f}', ha='center', va='bottom', fontweight='bold')
+    
+    ax2.set_ylabel('Average Classification Accuracy')
+    ax2.set_title('Period-wise Classification Accuracy Comparison')
+    ax2.set_ylim([0, max(1.0, max(period_values) * 1.2)])
+    ax2.legend()
+    ax2.grid(True, axis='y', alpha=0.3)
+    
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=cfg.VISUALIZATION_DPI, bbox_inches='tight')
+        print(f"Accuracy over time plot saved to: {save_path}")
+    plt.show()
+
+def visualize_combined_analysis(accuracies, fisher_scores, time_points=None,
+                              pre_frames=cfg.PRE_FRAMES, stimulus_duration=cfg.STIMULUS_DURATION,
+                              save_path=None):
+    """
+    Visualize both classification accuracy and Fisher information over time in one plot
+    
+    Parameters:
+    accuracies: Array of accuracy scores
+    fisher_scores: Array of Fisher information scores
+    time_points: Time point array
+    pre_frames: Number of baseline frames  
+    stimulus_duration: Duration of stimulus in frames
+    save_path: Path to save the figure
+    """
+    setup_plot_style()
+    
+    if time_points is None:
+        time_points = np.arange(len(accuracies))
+    
+    stimulus_start = pre_frames
+    stimulus_end = pre_frames + stimulus_duration
+    
+    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(12, 15))
+    
+    # Classification accuracy plot
+    ax1.plot(time_points, accuracies, linewidth=2.5, color=cfg.PLOT_COLORS['primary'], 
+             alpha=0.8, label='Classification Accuracy')
+    ax1.axhline(1/3, color=cfg.PLOT_COLORS['neutral'], linestyle='--', 
+               linewidth=1.5, alpha=0.7, label='Chance Level (0.333)')
+    
+    # Add periods
+    for ax in [ax1, ax2]:
+        ax.axvspan(0, stimulus_start, alpha=0.15, color=cfg.BASELINE_COLOR)
+        ax.axvspan(stimulus_start, stimulus_end, alpha=0.15, color=cfg.STIMULUS_COLOR)
+        ax.axvspan(stimulus_end, len(time_points), alpha=0.15, color=cfg.RESPONSE_COLOR)
+    
+    ax1.set_ylabel('Classification Accuracy')
+    ax1.set_title('Classification Accuracy Over Time')
+    ax1.legend()
+    ax1.grid(True, alpha=0.3)
+    ax1.set_ylim([0, max(1.0, max(accuracies) * 1.1)])
+    
+    # Fisher information plot  
+    ax2.plot(time_points, fisher_scores, linewidth=2.5, color=cfg.PLOT_COLORS['secondary'], 
+             alpha=0.8, label='Fisher Information')
+    
+    ax2.set_ylabel('Fisher Information Score')
+    ax2.set_title('Fisher Information Over Time')
+    ax2.legend()
+    ax2.grid(True, alpha=0.3)
+    
+    # Combined correlation plot
+    # Normalize both measures to [0,1] for comparison
+    norm_acc = (accuracies - np.min(accuracies)) / (np.max(accuracies) - np.min(accuracies) + 1e-8)
+    norm_fisher = (fisher_scores - np.min(fisher_scores)) / (np.max(fisher_scores) - np.min(fisher_scores) + 1e-8)
+    
+    ax3.plot(time_points, norm_acc, linewidth=2, color=cfg.PLOT_COLORS['primary'], 
+             alpha=0.8, label='Normalized Accuracy')
+    ax3.plot(time_points, norm_fisher, linewidth=2, color=cfg.PLOT_COLORS['secondary'], 
+             alpha=0.8, label='Normalized Fisher Info')
+    
+    # Calculate correlation
+    correlation = np.corrcoef(accuracies, fisher_scores)[0, 1]
+    
+    ax3.axvspan(0, stimulus_start, alpha=0.15, color=cfg.BASELINE_COLOR, label='Baseline')
+    ax3.axvspan(stimulus_start, stimulus_end, alpha=0.15, color=cfg.STIMULUS_COLOR, label='Stimulus')
+    ax3.axvspan(stimulus_end, len(time_points), alpha=0.15, color=cfg.RESPONSE_COLOR, label='Response')
+    
+    ax3.set_xlabel(f'Time ({cfg.TIME_UNIT})')
+    ax3.set_ylabel('Normalized Score')
+    ax3.set_title(f'Combined Analysis (Correlation: {correlation:.3f})')
+    ax3.legend()
+    ax3.grid(True, alpha=0.3)
+    ax3.set_ylim([0, 1])
+    
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=cfg.VISUALIZATION_DPI, bbox_inches='tight')
+        print(f"Combined analysis plot saved to: {save_path}")
+    plt.show()
+
+def visualize_neuron_count_effect(neuron_counts, accuracies, accuracy_stds, 
+                                fisher_scores, fisher_stds, save_path=None):
+    """
+    Visualize the effect of neuron count on classification performance and Fisher information
+    
+    Parameters:
+    neuron_counts: Array of neuron counts tested
+    accuracies: Array of accuracy scores
+    accuracy_stds: Array of accuracy standard deviations
+    fisher_scores: Array of Fisher information scores  
+    fisher_stds: Array of Fisher information standard deviations
+    save_path: Path to save the figure
+    """
+    setup_plot_style()
+    
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+    
+    # Classification accuracy vs neuron count
+    ax1.errorbar(neuron_counts, accuracies, yerr=accuracy_stds, 
+                fmt='o-', linewidth=2.5, markersize=6, capsize=5,
+                color=cfg.PLOT_COLORS['primary'], alpha=0.8, 
+                markerfacecolor='white', markeredgewidth=2)
+    
+    # Add saturation analysis
+    if len(accuracies) > 2:
+        # Find where improvement becomes minimal
+        improvements = np.diff(accuracies)
+        saturation_threshold = 0.01  # 1% improvement threshold
+        
+        saturation_indices = np.where(improvements < saturation_threshold)[0]
+        if len(saturation_indices) > 0:
+            saturation_point = neuron_counts[saturation_indices[0] + 1]
+            ax1.axvline(saturation_point, color=cfg.PLOT_COLORS['accent'], 
+                       linestyle='--', linewidth=2, alpha=0.7,
+                       label=f'Saturation Point (~{saturation_point} neurons)')
+    
+    ax1.set_xlabel('Number of Neurons')
+    ax1.set_ylabel('Classification Accuracy')
+    ax1.set_title('Classification Performance vs Neuron Count')
+    ax1.grid(True, alpha=0.3)
+    if 'saturation_point' in locals():
+        ax1.legend()
+    
+    # Fisher information vs neuron count
+    ax2.errorbar(neuron_counts, fisher_scores, yerr=fisher_stds,
+                fmt='s-', linewidth=2.5, markersize=6, capsize=5,
+                color=cfg.PLOT_COLORS['secondary'], alpha=0.8,
+                markerfacecolor='white', markeredgewidth=2)
+    
+    # Add trend line
+    if len(fisher_scores) > 2:
+        z = np.polyfit(neuron_counts, fisher_scores, 1)
+        p = np.poly1d(z)
+        ax2.plot(neuron_counts, p(neuron_counts), color=cfg.PLOT_COLORS['accent'], 
+                linestyle=':', linewidth=2, alpha=0.7, 
+                label=f'Trend (slope: {z[0]:.3f})')
+        ax2.legend()
+    
+    ax2.set_xlabel('Number of Neurons')
+    ax2.set_ylabel('Fisher Information Score')
+    ax2.set_title('Fisher Information vs Neuron Count')
+    ax2.grid(True, alpha=0.3)
+    
+    # Add performance annotations
+    max_acc_idx = np.argmax(accuracies)
+    ax1.annotate(f'Peak: {accuracies[max_acc_idx]:.3f}',
+                xy=(neuron_counts[max_acc_idx], accuracies[max_acc_idx]),
+                xytext=(10, 10), textcoords='offset points',
+                bbox=dict(boxstyle='round,pad=0.3', facecolor='yellow', alpha=0.7),
+                arrowprops=dict(arrowstyle='->', connectionstyle='arc3,rad=0'))
+    
+    max_fisher_idx = np.argmax(fisher_scores)
+    ax2.annotate(f'Peak: {fisher_scores[max_fisher_idx]:.3f}',
+                xy=(neuron_counts[max_fisher_idx], fisher_scores[max_fisher_idx]),
+                xytext=(10, 10), textcoords='offset points',
+                bbox=dict(boxstyle='round,pad=0.3', facecolor='yellow', alpha=0.7),
+                arrowprops=dict(arrowstyle='->', connectionstyle='arc3,rad=0'))
+    
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=cfg.VISUALIZATION_DPI, bbox_inches='tight')
+        print(f"Neuron count effect plot saved to: {save_path}")
+    plt.show()
 
 # %% ========== Fisher信息分析函数 ==========
 def calculate_fisher_information(segments, labels, rr_neurons):
@@ -930,42 +1783,8 @@ def calculate_fisher_information(segments, labels, rr_neurons):
         # 提取单个时间点的数据
         timepoint_data = valid_segments[:, :, t]  # (trials, neurons)
         
-        # 计算类间和类内方差
-        class_means = []
-        class_vars = []
-        class_data = []
-        
-        for label in unique_labels:
-            label_mask = valid_labels == label
-            label_data = timepoint_data[label_mask]  # (trials_for_this_label, neurons)
-            
-            if len(label_data) > 0:
-                class_data.append(label_data)
-                class_means.append(np.mean(label_data, axis=0))  # 每个神经元的均值
-                class_vars.append(np.var(label_data, axis=0))    # 每个神经元的方差
-        
-        if len(class_means) < 2:
-            fisher_scores.append(0.0)
-            continue
-            
-        class_means = np.array(class_means)  # (n_classes, n_neurons)
-        class_vars = np.array(class_vars)    # (n_classes, n_neurons)
-        
-        # 计算Fisher比率：类间方差 / 类内方差
-        # 类间方差：不同类别均值之间的方差
-        between_class_var = np.var(class_means, axis=0)  # (n_neurons,)
-        
-        # 类内方差：各类别内部方差的平均
-        within_class_var = np.mean(class_vars, axis=0)   # (n_neurons,)
-        
-        # 避免除零错误
-        within_class_var = np.maximum(within_class_var, 1e-10)
-        
-        # Fisher比率
-        fisher_ratio = between_class_var / within_class_var  # (n_neurons,)
-        
-        # 对所有神经元求平均作为该时间点的Fisher分数
-        fisher_score = np.mean(fisher_ratio)
+        # 使用多变量Fisher信息计算
+        fisher_score = calculate_multivariate_fisher_single_timepoint(timepoint_data, valid_labels)
         fisher_scores.append(fisher_score)
         
         if t % 10 == 0:  # 每10个时间点打印一次进度
@@ -973,10 +1792,92 @@ def calculate_fisher_information(segments, labels, rr_neurons):
     
     return np.array(fisher_scores)
 
-def plot_fisher_information(fisher_scores, time_points, pre_frames=cfg.PRE_FRAMES, 
-                           stimulus_duration=cfg.STIMULUS_DURATION):
+def calculate_multivariate_fisher_single_timepoint(data, labels):
     """
-    绘制Fisher信息随时间变化的曲线
+    计算单个时间点的多变量Fisher信息
+    
+    参数:
+    data: 神经数据 (trials, neurons)
+    labels: 标签数组
+    
+    返回:
+    fisher_score: 多变量Fisher信息分数
+    """
+    from scipy.linalg import pinv
+    
+    unique_labels = np.unique(labels)
+    if len(unique_labels) < 2:
+        return 0.0
+    
+    n_trials, n_neurons = data.shape
+    n_classes = len(unique_labels)
+    
+    # 检查是否有足够的数据
+    min_samples_per_class = min([np.sum(labels == label) for label in unique_labels])
+    if min_samples_per_class < 2:
+        return 0.0
+    
+    # 计算总体均值
+    grand_mean = np.mean(data, axis=0)  # (n_neurons,)
+    
+    # 计算类别均值和样本数
+    class_means = []
+    class_sizes = []
+    
+    for label in unique_labels:
+        label_mask = labels == label
+        label_data = data[label_mask]
+        if len(label_data) > 0:
+            class_means.append(np.mean(label_data, axis=0))
+            class_sizes.append(len(label_data))
+        else:
+            class_means.append(grand_mean)
+            class_sizes.append(0)
+    
+    class_means = np.array(class_means)  # (n_classes, n_neurons)
+    class_sizes = np.array(class_sizes)
+    
+    # 计算类间散布矩阵 (Between-class scatter matrix)
+    S_b = np.zeros((n_neurons, n_neurons), dtype=np.float64)
+    for i, (class_mean, n_i) in enumerate(zip(class_means, class_sizes)):
+        if n_i > 0:
+            diff = (class_mean - grand_mean).reshape(-1, 1).astype(np.float64)
+            S_b += n_i * np.dot(diff, diff.T).astype(np.float64)
+    
+    # 计算类内散布矩阵 (Within-class scatter matrix)
+    S_w = np.zeros((n_neurons, n_neurons), dtype=np.float64)
+    for label in unique_labels:
+        label_mask = labels == label
+        label_data = data[label_mask]
+        if len(label_data) > 1:  # 需要至少2个样本才能计算协方差
+            class_mean = np.mean(label_data, axis=0).astype(np.float64)
+            centered_data = (label_data - class_mean).astype(np.float64)
+            S_w += np.dot(centered_data.T, centered_data).astype(np.float64)
+    
+    # 添加正则化项避免奇异矩阵
+    regularization = 1e-6 * np.eye(n_neurons, dtype=np.float64)
+    S_w += regularization
+    
+    try:
+        # 计算多变量Fisher判别比: trace(S_w^(-1) * S_b)
+        S_w_inv = pinv(S_w)
+        fisher_matrix = np.dot(S_w_inv, S_b)
+        
+        # Fisher信息是矩阵的迹
+        fisher_score = np.trace(fisher_matrix)
+        
+        # 确保返回非负值
+        fisher_score = max(0.0, fisher_score)
+        
+    except Exception as e:
+        fisher_score = 0.0
+    
+    return fisher_score
+
+def save_fisher_information(fisher_scores, time_points, pre_frames=cfg.PRE_FRAMES, 
+                           stimulus_duration=cfg.STIMULUS_DURATION, save_dir='results'):
+    """
+    保存Fisher信息随时间变化的数据和统计信息
     
     参数:
     fisher_scores: Fisher信息分数数组
@@ -984,52 +1885,669 @@ def plot_fisher_information(fisher_scores, time_points, pre_frames=cfg.PRE_FRAME
     pre_frames: 刺激前帧数
     stimulus_duration: 刺激持续时间
     """
-    plt.figure(figsize=cfg.FIGURE_SIZE_MEDIUM)
+    os.makedirs(save_dir, exist_ok=True)
     
-    # 绘制Fisher信息曲线
-    plt.plot(time_points, fisher_scores, 'g-', linewidth=2, label='Fisher Information')
-    
-    # 添加刺激期标识
     stimulus_start = pre_frames
     stimulus_end = pre_frames + stimulus_duration
     
-    # 标记刺激开始和结束
-    plt.axvline(x=stimulus_start, color='red', linestyle='--', alpha=0.7, label='Stimulus Start')
-    plt.axvline(x=stimulus_end, color='red', linestyle=':', alpha=0.7, label='Stimulus End')
-    
-    # 添加刺激期背景
-    plt.axvspan(stimulus_start, stimulus_end, alpha=0.2, color='red', label='Stimulus Period')
-    
-    # 设置图形属性
-    plt.xlabel('Time Point (frames)')
-    plt.ylabel('Fisher Information')
-    plt.title('Fisher Information Over Time Within Trials')
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    
-    # 添加时间轴标签
-    plt.xticks(np.arange(0, max(time_points)+1, 10))
-    
-    # 显示最高Fisher信息点
+    # 计算统计信息
     max_fisher_idx = np.argmax(fisher_scores)
     max_time = time_points[max_fisher_idx]
     max_fisher = fisher_scores[max_fisher_idx]
     
-    plt.plot(max_time, max_fisher, 'ro', markersize=8)
-    plt.annotate(f'Peak: {max_fisher:.3f}@t={max_time}', 
-                xy=(max_time, max_fisher), xytext=(max_time+5, max_fisher+max_fisher*0.1),
-                arrowprops=dict(arrowstyle='->', color='red', alpha=0.7))
+    baseline_fisher = np.mean(fisher_scores[:pre_frames]) if pre_frames > 0 else 0
+    stimulus_fisher = np.mean(fisher_scores[stimulus_start:stimulus_end])
+    response_fisher = np.mean(fisher_scores[stimulus_end:]) if stimulus_end < len(fisher_scores) else 0
     
-    plt.tight_layout()
-    plt.show()
+    fisher_stats = {
+        'time_points': time_points,
+        'fisher_scores': fisher_scores,
+        'stimulus_start': stimulus_start,
+        'stimulus_end': stimulus_end,
+        'baseline_fisher': baseline_fisher,
+        'stimulus_fisher': stimulus_fisher,
+        'response_fisher': response_fisher,
+        'max_fisher': max_fisher,
+        'max_time': max_time,
+        'overall_mean': np.mean(fisher_scores),
+        'overall_std': np.std(fisher_scores)
+    }
+    
+    np.savez_compressed(
+        os.path.join(save_dir, 'fisher_over_time.npz'),
+        **fisher_stats
+    )
     
     # 打印关键统计信息
     print(f"\n=== Fisher信息分析结果 ===")
-    print(f"基线期平均Fisher信息: {np.mean(fisher_scores[:pre_frames]):.3f}")
-    print(f"刺激期平均Fisher信息: {np.mean(fisher_scores[stimulus_start:stimulus_end]):.3f}")
-    print(f"响应期平均Fisher信息: {np.mean(fisher_scores[stimulus_end:]):.3f}")
+    print(f"基线期平均Fisher信息: {baseline_fisher:.3f}")
+    print(f"刺激期平均Fisher信息: {stimulus_fisher:.3f}")
+    print(f"响应期平均Fisher信息: {response_fisher:.3f}")
     print(f"最高Fisher信息: {max_fisher:.3f} (时间点 {max_time})")
     print(f"整体平均Fisher信息: {np.mean(fisher_scores):.3f} ± {np.std(fisher_scores):.3f}")
+    print(f"Fisher信息结果已保存到 {save_dir}/fisher_over_time.npz")
+
+def visualize_fisher_information(fisher_scores, time_points=None, 
+                               pre_frames=cfg.PRE_FRAMES, stimulus_duration=cfg.STIMULUS_DURATION,
+                               save_path=None):
+    """
+    Visualize Fisher Information over time
+    
+    Parameters:
+    fisher_scores: Array of Fisher information scores
+    time_points: Time point array
+    pre_frames: Number of baseline frames
+    stimulus_duration: Duration of stimulus in frames
+    save_path: Path to save the figure
+    """
+    setup_plot_style()
+    
+    if time_points is None:
+        time_points = np.arange(len(fisher_scores))
+    
+    stimulus_start = pre_frames
+    stimulus_end = pre_frames + stimulus_duration
+    
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))
+    
+    # Main Fisher information plot
+    ax1.plot(time_points, fisher_scores, linewidth=2.5, color=cfg.PLOT_COLORS['primary'], 
+             alpha=0.8, label='Fisher Information')
+    
+    # Add baseline and stimulus periods
+    ax1.axvspan(0, stimulus_start, alpha=0.2, color=cfg.BASELINE_COLOR, 
+               label='Baseline Period')
+    ax1.axvspan(stimulus_start, stimulus_end, alpha=0.2, color=cfg.STIMULUS_COLOR, 
+               label='Stimulus Period')
+    ax1.axvspan(stimulus_end, len(time_points), alpha=0.2, color=cfg.RESPONSE_COLOR, 
+               label='Response Period')
+    
+    # Mark peak
+    max_idx = np.argmax(fisher_scores)
+    max_time = time_points[max_idx]
+    max_fisher = fisher_scores[max_idx]
+    ax1.plot(max_time, max_fisher, 'o', markersize=8, color=cfg.PLOT_COLORS['accent'], 
+             markeredgecolor='black', markeredgewidth=1.5, 
+             label=f'Peak: {max_fisher:.3f} at t={max_time}')
+    
+    ax1.set_xlabel(f'Time ({cfg.TIME_UNIT})')
+    ax1.set_ylabel('Fisher Information Score')
+    ax1.set_title('Fisher Information Over Time')
+    ax1.legend(loc='upper right')
+    ax1.grid(True, alpha=0.3)
+    
+    # Period-wise comparison
+    periods = ['Baseline', 'Stimulus', 'Response']
+    
+    # Calculate period averages
+    baseline_fisher = np.mean(fisher_scores[:pre_frames]) if pre_frames > 0 else 0
+    stimulus_fisher = np.mean(fisher_scores[stimulus_start:stimulus_end])
+    response_fisher = np.mean(fisher_scores[stimulus_end:]) if stimulus_end < len(fisher_scores) else 0
+    
+    period_values = [baseline_fisher, stimulus_fisher, response_fisher]
+    period_colors = [cfg.BASELINE_COLOR, cfg.STIMULUS_COLOR, cfg.RESPONSE_COLOR]
+    
+    bars = ax2.bar(periods, period_values, color=period_colors, alpha=0.7, 
+                   edgecolor='black', linewidth=1.2)
+    
+    # Add value labels
+    for bar, value in zip(bars, period_values):
+        ax2.text(bar.get_x() + bar.get_width()/2, bar.get_height() + max(period_values) * 0.02,
+                f'{value:.3f}', ha='center', va='bottom', fontweight='bold')
+    
+    ax2.set_ylabel('Average Fisher Information')
+    ax2.set_title('Period-wise Fisher Information Comparison')
+    ax2.grid(True, axis='y', alpha=0.3)
+    
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=cfg.VISUALIZATION_DPI, bbox_inches='tight')
+        print(f"Fisher information plot saved to: {save_path}")
+    plt.show()
+
+def visualize_fisher_heatmap(segments, labels, rr_neurons, time_window=None, save_path=None):
+    """
+    Visualize Fisher Information as a heatmap across neurons and time
+    
+    Parameters:
+    segments: Neural data segments (trials, neurons, timepoints)
+    labels: Label array
+    rr_neurons: RR neuron indices
+    time_window: Specific time window to analyze (start, end)
+    save_path: Path to save the figure
+    """
+    setup_plot_style()
+    
+    # Filter valid data and RR neurons
+    valid_mask = labels != 0
+    valid_segments = segments[valid_mask][:, rr_neurons, :]
+    valid_labels = labels[valid_mask]
+    
+    n_trials, n_neurons, n_timepoints = valid_segments.shape
+    
+    if time_window:
+        start_t, end_t = time_window
+        valid_segments = valid_segments[:, :, start_t:end_t]
+        n_timepoints = end_t - start_t
+        time_points = np.arange(start_t, end_t)
+    else:
+        time_points = np.arange(n_timepoints)
+    
+    # Calculate Fisher information for each neuron at each timepoint
+    fisher_matrix = np.zeros((n_neurons, n_timepoints))
+    
+    print(f"Calculating Fisher information heatmap for {n_neurons} neurons...")
+    
+    for neuron_idx in range(min(n_neurons, 50)):  # Limit to 50 neurons for visualization
+        for t_idx in range(n_timepoints):
+            timepoint_data = valid_segments[:, neuron_idx, t_idx].reshape(-1, 1)
+            fisher_score = calculate_multivariate_fisher_single_timepoint(timepoint_data, valid_labels)
+            fisher_matrix[neuron_idx, t_idx] = fisher_score
+        
+        if neuron_idx % 10 == 0:
+            print(f"Processed {neuron_idx+1}/{min(n_neurons, 50)} neurons")
+    
+    # Create heatmap
+    fig, ax = plt.subplots(figsize=(14, 8))
+    
+    im = ax.imshow(fisher_matrix[:50], aspect='auto', cmap='viridis', 
+                   interpolation='nearest', alpha=0.9)
+    
+    # Colorbar
+    cbar = fig.colorbar(im, ax=ax, shrink=0.8)
+    cbar.set_label('Fisher Information Score', rotation=270, labelpad=20)
+    
+    # Add stimulus period indication
+    if not time_window:
+        stimulus_start = cfg.PRE_FRAMES
+        stimulus_end = cfg.PRE_FRAMES + cfg.STIMULUS_DURATION
+        ax.axvline(stimulus_start, color='white', linestyle='--', linewidth=2, alpha=0.8)
+        ax.axvline(stimulus_end, color='white', linestyle='--', linewidth=2, alpha=0.8)
+        ax.text(stimulus_start + cfg.STIMULUS_DURATION/2, n_neurons*0.95, 'Stimulus', 
+                ha='center', va='center', color='white', fontweight='bold')
+    
+    ax.set_xlabel(f'Time ({cfg.TIME_UNIT})')
+    ax.set_ylabel('RR Neurons')
+    ax.set_title('Fisher Information Heatmap Across Neurons and Time')
+    
+    # Set ticks
+    n_ticks = 10
+    time_tick_indices = np.linspace(0, n_timepoints-1, n_ticks, dtype=int)
+    ax.set_xticks(time_tick_indices)
+    ax.set_xticklabels([f'{time_points[i]}' for i in time_tick_indices])
+    
+    neuron_tick_indices = np.linspace(0, min(n_neurons, 50)-1, min(10, n_neurons), dtype=int)
+    ax.set_yticks(neuron_tick_indices)
+    ax.set_yticklabels([f'N{rr_neurons[i]}' for i in neuron_tick_indices])
+    
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=cfg.VISUALIZATION_DPI, bbox_inches='tight')
+        print(f"Fisher information heatmap saved to: {save_path}")
+    plt.show()
+
+def visualize_fisher_comparison(fisher_data_dict, save_path=None):
+    """
+    Compare Fisher Information across different conditions or methods
+    
+    Parameters:
+    fisher_data_dict: Dictionary with condition names as keys and fisher scores as values
+    save_path: Path to save the figure
+    """
+    setup_plot_style()
+    
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+    
+    # Time series comparison
+    colors = plt.cm.Set2(np.linspace(0, 1, len(fisher_data_dict)))
+    
+    for (condition, fisher_scores), color in zip(fisher_data_dict.items(), colors):
+        time_points = np.arange(len(fisher_scores))
+        ax1.plot(time_points, fisher_scores, linewidth=2.5, 
+                label=condition, color=color, alpha=0.8)
+    
+    # Add stimulus period
+    stimulus_start = cfg.PRE_FRAMES
+    stimulus_end = cfg.PRE_FRAMES + cfg.STIMULUS_DURATION
+    ax1.axvspan(stimulus_start, stimulus_end, alpha=0.2, color=cfg.STIMULUS_COLOR, 
+               label='Stimulus Period')
+    
+    ax1.set_xlabel(f'Time ({cfg.TIME_UNIT})')
+    ax1.set_ylabel('Fisher Information Score')
+    ax1.set_title('Fisher Information Comparison Over Time')
+    ax1.legend()
+    ax1.grid(True, alpha=0.3)
+    
+    # Summary statistics comparison
+    conditions = list(fisher_data_dict.keys())
+    means = [np.mean(scores) for scores in fisher_data_dict.values()]
+    peaks = [np.max(scores) for scores in fisher_data_dict.values()]
+    
+    x = np.arange(len(conditions))
+    width = 0.35
+    
+    bars1 = ax2.bar(x - width/2, means, width, label='Mean Fisher Info', 
+                   color=cfg.PLOT_COLORS['primary'], alpha=0.7, edgecolor='black')
+    bars2 = ax2.bar(x + width/2, peaks, width, label='Peak Fisher Info',
+                   color=cfg.PLOT_COLORS['accent'], alpha=0.7, edgecolor='black')
+    
+    # Add value labels
+    for bars in [bars1, bars2]:
+        for bar in bars:
+            height = bar.get_height()
+            ax2.text(bar.get_x() + bar.get_width()/2., height + max(peaks) * 0.02,
+                    f'{height:.3f}', ha='center', va='bottom', fontweight='bold')
+    
+    ax2.set_ylabel('Fisher Information Score')
+    ax2.set_title('Fisher Information Summary Statistics')
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(conditions)
+    ax2.legend()
+    ax2.grid(True, axis='y', alpha=0.3)
+    
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=cfg.VISUALIZATION_DPI, bbox_inches='tight')
+        print(f"Fisher information comparison saved to: {save_path}")
+    plt.show()
+
+
+# %% ========== 神经元数量对性能影响分析 ==========
+
+def analyze_neuron_count_effect(segments, labels, rr_neurons, time_start=20, time_end=30, 
+                               neuron_counts=None, n_iterations=10):
+    """
+    分析随着神经元数量增加对分类准确率和Fisher信息的影响
+    
+    参数:
+    segments: 神经数据片段 (trials, neurons, timepoints)
+    labels: 标签数组
+    rr_neurons: RR神经元索引列表
+    time_start: 分析时间窗口开始点
+    time_end: 分析时间窗口结束点
+    neuron_counts: 要测试的神经元数量列表
+    n_iterations: 每个神经元数量的重复次数（随机采样）
+    
+    返回:
+    results: 包含分类准确率和Fisher信息结果的字典
+    """
+    from scipy.stats import f_oneway
+    
+    print(f"分析神经元数量对性能的影响（时间窗口: {time_start}-{time_end}）")
+    
+    # 过滤有效数据和RR神经元
+    valid_mask = labels != 0
+    valid_segments = segments[valid_mask][:, rr_neurons, :]
+    valid_labels = labels[valid_mask]
+    
+    n_trials, n_rr_neurons, n_timepoints = valid_segments.shape
+    
+    # 设置默认的神经元数量测试点
+    if neuron_counts is None:
+        max_neurons = min(n_rr_neurons, 200)  # 最多测试200个神经元
+        neuron_counts = [5, 10, 20, 30, 50, 75, 100, 150, 200]
+        neuron_counts = [n for n in neuron_counts if n <= max_neurons]
+    
+    print(f"可用RR神经元数: {n_rr_neurons}")
+    print(f"测试神经元数量: {neuron_counts}")
+    
+    results = {
+        'neuron_counts': neuron_counts,
+        'accuracies': [],
+        'accuracy_stds': [],
+        'fisher_scores': [],
+        'fisher_stds': []
+    }
+    
+    for n_neurons in neuron_counts:
+        print(f"\n测试 {n_neurons} 个神经元...")
+        
+        iteration_accuracies = []
+        iteration_fishers = []
+        
+        for iteration in range(n_iterations):
+            # 随机选择神经元子集
+            if n_neurons >= n_rr_neurons:
+                selected_neurons = list(range(n_rr_neurons))
+            else:
+                selected_neurons = np.random.choice(n_rr_neurons, n_neurons, replace=False)
+            
+            # 提取选定神经元和时间窗口的数据
+            subset_data = valid_segments[:, selected_neurons, time_start:time_end]
+            
+            # 1. 计算分类准确率
+            accuracy = calculate_classification_accuracy_window(subset_data, valid_labels)
+            iteration_accuracies.append(accuracy)
+            
+            # 2. 计算Fisher信息
+            fisher_score = calculate_fisher_information_window(subset_data, valid_labels)
+            iteration_fishers.append(fisher_score)
+        
+        # 统计结果
+        mean_accuracy = np.mean(iteration_accuracies)
+        std_accuracy = np.std(iteration_accuracies)
+        mean_fisher = np.mean(iteration_fishers)
+        std_fisher = np.std(iteration_fishers)
+        
+        results['accuracies'].append(mean_accuracy)
+        results['accuracy_stds'].append(std_accuracy)
+        results['fisher_scores'].append(mean_fisher)
+        results['fisher_stds'].append(std_fisher)
+        
+        print(f"  分类准确率: {mean_accuracy:.3f} ± {std_accuracy:.3f}")
+        print(f"  Fisher信息: {mean_fisher:.3f} ± {std_fisher:.3f}")
+    
+    return results
+
+
+def calculate_classification_accuracy_window(data, labels):
+    """
+    计算指定时间窗口数据的分类准确率
+    
+    参数:
+    data: 神经数据 (trials, neurons, timepoints)
+    labels: 标签数组
+    
+    返回:
+    accuracy: 分类准确率
+    """
+    from sklearn.svm import SVC
+    from sklearn.model_selection import train_test_split
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.metrics import accuracy_score
+    
+    # 将数据展平为特征向量
+    n_trials, n_neurons, n_timepoints = data.shape
+    features = data.reshape(n_trials, n_neurons * n_timepoints)
+    
+    # 检查是否有足够的数据进行分类
+    unique_labels = np.unique(labels)
+    if len(unique_labels) < 2:
+        return 0.0
+    
+    # 检查每个类别是否有足够的样本
+    min_samples = min([np.sum(labels == label) for label in unique_labels])
+    if min_samples < 2:
+        return 0.0
+    
+    try:
+        # 数据标准化
+        scaler = StandardScaler()
+        features_scaled = scaler.fit_transform(features)
+        
+        # 分割数据
+        test_size = min(0.3, 0.5)  # 确保有足够的训练数据
+        X_train, X_test, y_train, y_test = train_test_split(
+            features_scaled, labels, test_size=test_size, 
+            random_state=42, stratify=labels
+        )
+        
+        # 训练分类器
+        classifier = SVC(kernel='linear', random_state=42, C=1.0)
+        classifier.fit(X_train, y_train)
+        
+        # 预测和评估
+        y_pred = classifier.predict(X_test)
+        accuracy = accuracy_score(y_test, y_pred)
+        
+        return accuracy
+    
+    except Exception as e:
+        print(f"分类计算出错: {e}")
+        return 0.0
+
+
+def calculate_fisher_information_window(data, labels):
+    """
+    计算指定时间窗口数据的多变量Fisher信息（改进版本，包含PCA降维）
+    
+    参数:
+    data: 神经数据 (trials, neurons, timepoints)
+    labels: 标签数组
+    
+    返回:
+    fisher_score: 多变量Fisher信息分数
+    """
+    from scipy.linalg import pinv, eigvals
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.decomposition import PCA
+    
+    # 对时间维度取平均
+    mean_data = np.mean(data, axis=2)  # (trials, neurons)
+    
+    # 只使用类别1和2进行Fisher信息计算，排除类别3（噪音条件）
+    target_labels = [1, 2]
+    target_mask = np.isin(labels, target_labels)
+    
+    if np.sum(target_mask) < 10:  # 至少需要10个样本
+        return 0.0
+        
+    # 过滤数据和标签
+    filtered_data = mean_data[target_mask]
+    filtered_labels = labels[target_mask]
+    
+    unique_labels = np.unique(filtered_labels)
+    if len(unique_labels) < 2:
+        return 0.0
+    
+    n_trials, n_neurons = filtered_data.shape
+    n_classes = len(unique_labels)
+    
+    # 检查样本数是否足够
+    min_samples_per_class = min([np.sum(filtered_labels == label) for label in unique_labels])
+    if min_samples_per_class < 2:
+        return 0.0
+    
+    # 数据标准化避免数值问题
+    scaler = StandardScaler()
+    mean_data_scaled = scaler.fit_transform(filtered_data)
+    
+    # 关键改进：当神经元数量接近或超过试次数时，使用PCA降维
+    effective_dim = min(n_neurons, n_trials - n_classes - 1)  # 有效维度上限
+    
+    # 设置PCA目标维度：确保远小于试次数
+    if n_neurons > n_trials * 0.5:  # 当神经元数 > 试次数的50%时进行降维
+        # 目标维度：试次数的1/3，但至少保留2维，最多不超过15维
+        target_dim = max(2, min(15, n_trials // 3))
+        
+        print(f"使用PCA降维: {n_neurons}维 -> {target_dim}维 (试次数: {n_trials})")
+        
+        # 执行PCA降维
+        pca = PCA(n_components=target_dim, random_state=42)
+        mean_data_scaled = pca.fit_transform(mean_data_scaled)
+        
+        # 更新维度信息
+        n_neurons = target_dim
+        print(f"PCA解释方差比: {np.sum(pca.explained_variance_ratio_):.3f}")
+    
+    # 现在在降维后的数据上计算多变量Fisher信息
+    
+    # 计算总体均值
+    grand_mean = np.mean(mean_data_scaled, axis=0)  # (n_neurons,)
+    
+    # 计算类别均值和样本数
+    class_means = []
+    class_sizes = []
+    
+    for label in unique_labels:
+        label_mask = filtered_labels == label
+        label_data = mean_data_scaled[label_mask]
+        if len(label_data) > 0:
+            class_means.append(np.mean(label_data, axis=0))
+            class_sizes.append(len(label_data))
+        else:
+            class_means.append(grand_mean)
+            class_sizes.append(0)
+    
+    class_means = np.array(class_means)  # (n_classes, n_neurons)
+    class_sizes = np.array(class_sizes)
+    
+    # 计算类间散布矩阵 (Between-class scatter matrix)
+    S_b = np.zeros((n_neurons, n_neurons), dtype=np.float64)
+    for i, (class_mean, n_i) in enumerate(zip(class_means, class_sizes)):
+        if n_i > 0:
+            diff = (class_mean - grand_mean).reshape(-1, 1).astype(np.float64)
+            S_b += n_i * np.dot(diff, diff.T).astype(np.float64)
+    
+    # 计算类内散布矩阵 (Within-class scatter matrix)
+    S_w = np.zeros((n_neurons, n_neurons), dtype=np.float64)
+    for label in unique_labels:
+        label_mask = filtered_labels == label
+        label_data = mean_data_scaled[label_mask]
+        if len(label_data) > 1:
+            class_mean = np.mean(label_data, axis=0).astype(np.float64)
+            centered_data = (label_data - class_mean).astype(np.float64)
+            S_w += np.dot(centered_data.T, centered_data).astype(np.float64)
+    
+    # 自适应正则化：基于数据规模和条件数
+    # 计算S_w的条件数来决定正则化强度
+    try:
+        eigenvals = eigvals(S_w).real.astype(np.float64)  # 确保实数且为float64
+        eigenvals = eigenvals[eigenvals > 0]  # 只考虑正特征值
+        if len(eigenvals) > 1:
+            condition_number = float(np.max(eigenvals) / np.min(eigenvals))
+            # 根据条件数自适应调整正则化
+            reg_strength = max(1e-6, float(np.max(eigenvals)) * 1e-10 * condition_number)
+        else:
+            reg_strength = 1e-3
+    except:
+        reg_strength = 1e-3
+    
+    regularization = (reg_strength * np.eye(n_neurons)).astype(np.float64)
+    S_w += regularization
+    
+    try:
+        # 使用更稳定的方法计算多变量Fisher信息
+        # 方法1: 直接计算trace(S_w^(-1) * S_b)
+        S_w_inv = pinv(S_w).astype(np.float64)
+        fisher_matrix = np.dot(S_w_inv, S_b).astype(np.float64)
+        fisher_score = float(np.trace(fisher_matrix).real)  # 确保实数
+        
+        # 数值稳定性检查
+        if np.isnan(fisher_score) or np.isinf(fisher_score) or fisher_score < 0:
+            # 方法2: 使用广义特征值问题求解
+            from scipy.linalg import eigh
+            try:
+                eigenvals, _ = eigh(S_b, S_w)
+                eigenvals_real = eigenvals.real.astype(np.float64)
+                fisher_score = float(np.sum(eigenvals_real[eigenvals_real > 0]))
+            except:
+                # 方法3: 简化的多变量Fisher比率
+                trace_s_b = float(np.trace(S_b).real)
+                trace_s_w = float(np.trace(S_w).real)
+                fisher_score = trace_s_b / (trace_s_w + 1e-10)
+        
+        # 确保返回非负有限值
+        fisher_score = max(0.0, float(fisher_score))
+        if not np.isfinite(fisher_score):
+            fisher_score = 0.0
+        
+    except Exception as e:
+        # 最后的备选方案：使用简化版本
+        try:
+            trace_s_b = float(np.trace(S_b).real)
+            trace_s_w = float(np.trace(S_w).real)
+            fisher_score = trace_s_b / (trace_s_w + 1e-10)
+            fisher_score = max(0.0, float(fisher_score))
+        except:
+            fisher_score = 0.0
+    
+    return fisher_score
+
+
+def save_neuron_count_analysis(results, save_dir='results'):
+    """
+    保存神经元数量分析结果
+    
+    参数:
+    results: analyze_neuron_count_effect的返回结果
+    """
+    os.makedirs(save_dir, exist_ok=True)
+    
+    neuron_counts = results['neuron_counts']
+    accuracies = results['accuracies']
+    accuracy_stds = results['accuracy_stds']
+    fisher_scores = results['fisher_scores']
+    fisher_stds = results['fisher_stds']
+    
+    # 计算关键发现
+    accuracy_diffs = np.diff(accuracies)
+    fisher_diffs = np.diff(fisher_scores)
+    
+    # 找到饱和点
+    accuracy_saturation_point = None
+    fisher_saturation_point = None
+    
+    if len(accuracy_diffs) > 0:
+        min_improvement_idx = np.where(accuracy_diffs < 0.01)[0]  # 改善小于1%
+        if len(min_improvement_idx) > 0:
+            accuracy_saturation_point = neuron_counts[min_improvement_idx[0] + 1]
+    
+    if len(fisher_diffs) > 0:
+        min_fisher_improvement_idx = np.where(fisher_diffs < np.max(fisher_scores) * 0.05)[0]
+        if len(min_fisher_improvement_idx) > 0:
+            fisher_saturation_point = neuron_counts[min_fisher_improvement_idx[0] + 1]
+    
+    # 保存结果
+    count_analysis = {
+        'neuron_counts': neuron_counts,
+        'accuracies': accuracies,
+        'accuracy_stds': accuracy_stds,
+        'fisher_scores': fisher_scores,
+        'fisher_stds': fisher_stds,
+        'max_accuracy': max(accuracies),
+        'max_accuracy_neurons': neuron_counts[np.argmax(accuracies)],
+        'max_fisher': max(fisher_scores),
+        'max_fisher_neurons': neuron_counts[np.argmax(fisher_scores)],
+        'accuracy_saturation_point': accuracy_saturation_point,
+        'fisher_saturation_point': fisher_saturation_point
+    }
+    
+    np.savez_compressed(
+        os.path.join(save_dir, 'neuron_count_analysis.npz'),
+        **count_analysis
+    )
+    
+    # 打印关键发现
+    print("\n=== 神经元数量分析总结 ===")
+    if accuracy_saturation_point:
+        print(f"分类准确率饱和点: ~{accuracy_saturation_point} 个神经元")
+    if fisher_saturation_point:
+        print(f"Fisher信息饱和点: ~{fisher_saturation_point} 个神经元")
+    
+    print(f"最高分类准确率: {max(accuracies):.3f} ({neuron_counts[np.argmax(accuracies)]} 个神经元)")
+    print(f"最高Fisher信息: {max(fisher_scores):.3f} ({neuron_counts[np.argmax(fisher_scores)]} 个神经元)")
+    print(f"神经元数量分析结果已保存到 {save_dir}/neuron_count_analysis.npz")
+
+
+def run_neuron_count_analysis_if_requested(segments, new_labels, rr_neurons, enable_analysis=True):
+    """
+    运行神经元数量分析（可选）
+    
+    参数:
+    segments: 神经数据片段
+    new_labels: 重分类后的标签
+    rr_neurons: RR神经元索引
+    enable_analysis: 是否启用分析
+    """
+    if not enable_analysis:
+        return
+    
+    if len(rr_neurons) < 10:
+        print("RR神经元数量不足，跳过神经元数量分析")
+        return
+    
+    print("\n" + "="*60)
+    print("神经元数量对性能影响分析")
+    print("="*60)
+    
+    # 执行分析
+    results = analyze_neuron_count_effect(segments, new_labels, rr_neurons)
+    
+    # 保存结果
+    save_neuron_count_analysis(results, save_dir='results')
+    
+    return results
 
 
 # %% ========== 主脚本 ==========
@@ -1039,8 +2557,26 @@ if __name__ == '__main__':
     # %% 加载数据
     neuron_data, neuron_pos, trigger_data, stimulus_data = load_data(cfg.DATA_PATH)
     
-    # %% 简单可视化一下原始神经信号
-    plot_neuron_data(neuron_data[:,14858], trigger_data, stimulus_data)
+    # %% 可视化原始数据
+    print("\n=== 原始数据可视化 ===")
+    os.makedirs('results/figures', exist_ok=True)
+    
+    # 神经活动热图
+    visualize_neural_activity_heatmap(neuron_data, "Neural Activity Heatmap", 
+                                     save_path='results/figures/neural_activity_heatmap.png')
+    
+    # 触发信号分布  
+    visualize_trigger_distribution(trigger_data, "Stimulus Trigger Distribution",
+                                  save_path='results/figures/trigger_distribution.png')
+    
+    # 刺激数据分布
+    visualize_stimulus_data_distribution(stimulus_data, "Stimulus Data Distribution",
+                                        save_path='results/figures/stimulus_distribution.png')
+    
+    # RR神经元空间分布（稍后在RR分析后调用）
+    
+    # %% 保存神经信号统计信息
+    save_neuron_activity_stats(neuron_data, trigger_data, save_dir='results')
     
     # %% 将神经信号划分为trail，并标记label
     # 在分割前先检查原始神经数据的维度
@@ -1050,9 +2586,9 @@ if __name__ == '__main__':
     
     segments, labels = segment_neuron_data(neuron_data, trigger_data, stimulus_data)
     
-    # %% 验证标签对齐
-    # 简单绘制一下单个神经元所有trail的平均神经活动
-    plot_simple_neuron(14858, [10, 20, 30], segments)
+    # %% 保存示例神经元统计
+    # 保存单个神经元统计信息作为示例
+    save_single_neuron_stats(14858, [10, 20, 30], segments, save_dir='results')
     
     # 重新分类标签：类别1和2强度为1的作为第3类
     new_labels = reclassify_labels(stimulus_data)
@@ -1136,9 +2672,13 @@ if __name__ == '__main__':
     
     print(f"RR神经元结果已保存到: {rr_save_path}")
     
-    # 绘制神经元空间分布图
+    # 保存神经元空间分布统计
     if neuron_pos.shape[1] > 0:
-        plot_rr_neurons_distribution(neuron_pos, rr_results)
+        save_rr_neurons_distribution(neuron_pos, rr_results, save_dir='results')
+        
+        # 可视化RR神经元空间分布
+        visualize_rr_neurons_spatial_distribution(neuron_pos, rr_results,
+                                                save_path='results/figures/rr_neurons_spatial.png')
     
     print("\nRR神经元筛选完成！")
 
@@ -1190,18 +2730,26 @@ if __name__ == '__main__':
                 improvement = improved_results['best_cv_mean'] - original_results['best_cv_mean']
                 print(f"准确率提升: {improvement:+.3f}")
                 
-                # 可视化最佳模型的混淆矩阵
+                # 保存最佳模型的混淆矩阵
                 best_model = improved_results['best_model']
                 best_cm = improved_results['results'][best_model]['confusion_matrix']
                 
-                plt.figure(figsize=(8, 6))
-                sns.heatmap(best_cm, annot=True, fmt='d', cmap='Blues',
-                           xticklabels=['Category 1', 'Category 2', 'Category 3'],
-                           yticklabels=['Category 1', 'Category 2', 'Category 3'])
-                plt.title(f'{best_model} Classification Confusion Matrix (Preprocessed)')
-                plt.xlabel('Predicted Label')
-                plt.ylabel('True Label')
-                plt.show()
+                # 保存分类结果
+                os.makedirs('results', exist_ok=True)
+                np.savez_compressed(
+                    'results/classification_results.npz',
+                    best_model=best_model,
+                    confusion_matrix=best_cm,
+                    original_accuracy=original_results['best_cv_mean'],
+                    improved_accuracy=improved_results['best_cv_mean'],
+                    improvement=improved_results['best_cv_mean'] - original_results['best_cv_mean']
+                )
+                print("分类结果已保存到 results/classification_results.npz")
+                
+                # 可视化分类效果
+                print("\n=== 分类效果可视化 ===")
+                visualize_classification_performance(improved_results, 
+                                                   save_path='results/figures/classification_performance.png')
             else:
                 print(f"预处理方法准确率: {improved_results['best_cv_mean']:.3f} ± {improved_results['best_cv_std']:.3f}")
                 improvement = improved_results['best_cv_mean'] - original_results['best_cv_mean']
@@ -1218,13 +2766,70 @@ if __name__ == '__main__':
         time_accuracies, time_points = classify_by_timepoints(
             segments, new_labels, rr_results['rr_neurons'])
         
-        # 绘制结果
-        plot_accuracy_over_time(time_accuracies, time_points)
+        # 保存结果
+        save_accuracy_over_time(time_accuracies, time_points, save_dir='results')
+        
+        # 可视化时间点分类准确率
+        print("\n=== 时间点分析可视化 ===")
+        visualize_accuracy_over_time(time_accuracies, time_points,
+                                   save_path='results/figures/accuracy_over_time.png')
         
         # 计算Fisher信息
         print("\n=== Fisher信息分析 ===")
         fisher_scores = calculate_fisher_information(segments, new_labels, rr_results['rr_neurons'])
-        plot_fisher_information(fisher_scores, np.arange(len(fisher_scores)))
+        save_fisher_information(fisher_scores, np.arange(len(fisher_scores)), save_dir='results')
+        
+        # 可视化Fisher信息
+        print("\n=== Fisher信息可视化 ===")
+        visualize_fisher_information(fisher_scores, np.arange(len(fisher_scores)),
+                                   save_path='results/figures/fisher_information.png')
+        
+        # 可视化组合分析
+        print("\n=== 组合分析可视化 ===")  
+        visualize_combined_analysis(time_accuracies, fisher_scores, np.arange(len(fisher_scores)),
+                                  save_path='results/figures/combined_analysis.png')
+        
+        # 神经元数量分析
+        print("\n=== 神经元数量对性能影响分析 ===")
+        if len(rr_results['rr_neurons']) >= 10:
+            neuron_results = run_neuron_count_analysis_if_requested(
+                segments, new_labels, rr_results['rr_neurons'], enable_analysis=True
+            )
+            
+            # 可视化神经元数量效果
+            if neuron_results is not None:
+                print("\n=== 神经元数量效果可视化 ===")
+                visualize_neuron_count_effect(
+                    neuron_results['neuron_counts'],
+                    neuron_results['accuracies'],
+                    neuron_results['accuracy_stds'],
+                    neuron_results['fisher_scores'],
+                    neuron_results['fisher_stds'],
+                    save_path='results/figures/neuron_count_effect.png'
+                )
+        else:
+            print("RR神经元数量不足，跳过神经元数量分析")
+    
+    # %% 可视化总结
+    print("\n" + "="*60)
+    print("可视化总结")
+    print("="*60)
+    print("所有可视化图像已保存到 results/figures/ 目录:")
+    print("- neural_activity_heatmap.png: 神经活动热图")
+    print("- trigger_distribution.png: 刺激触发分布")
+    print("- stimulus_distribution.png: 刺激数据分布")
+    print("- rr_neurons_spatial.png: RR神经元空间分布")
+    
+    if len(rr_results['rr_neurons']) > 0:
+        print("- classification_performance.png: 分类性能对比")
+        print("- accuracy_over_time.png: 时间点分类准确率")
+        print("- fisher_information.png: Fisher信息分析")
+        print("- combined_analysis.png: 准确率与Fisher信息组合分析")
+        
+        if len(rr_results['rr_neurons']) >= 10:
+            print("- neuron_count_effect.png: 神经元数量对性能影响")
+    
+    print("\n数据分析完成！所有结果和图像已保存。")
 
 
 # %%

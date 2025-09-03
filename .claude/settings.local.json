@@ -4,7 +4,12 @@
       "WebFetch(domain:cebra.ai)",
       "WebSearch",
       "Bash(python:*)",
-      "Read(F:\\project\\202507OF/**)"
+      "Read(F:\\project\\202507OF/**)",
+      "Read(F:\\project\\202507OF/**)",
+      "Read(f:\\brain\\Micedata\\M65_0816\\analysis_logs/**)",
+      "Read(f:\\brain\\Micedata\\M65_0816\\analysis_logs/**)",
+      "Bash(grep:*)",
+      "Read(f:\\brain\\Micedata\\M65_0816\\analysis_logs/**)"
     ],
     "deny": [],
     "ask": []

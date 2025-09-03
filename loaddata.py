@@ -28,9 +28,21 @@ import warnings
 class Config:
     """统一参数配置类"""
     
-    # 数据路径
+    # 数据加载器版本: 'new' 或 'old'
+    # 'new': 使用 process_trigger 和 load_data 加载新版数据
+    # 'old': 使用 load_old_version_data 加载旧版 .mat 数据
+    LOADER_VERSION = 'new'
+
+    # 新版数据路径
     DATA_PATH = r'F:\brain\Micedata\M65_0816'
     
+    # 旧版数据路径 (仅在 LOADER_VERSION = 'old' 时使用)
+    OLD_VERSION_PATHS = {
+        'neurons': r'F:\brain\Micedata\M27_1008\Neurons.mat',
+        'trials': r'F:\brain\Micedata\M27_1008\Trial_data.mat',
+        'location': r'F:\brain\Micedata\M27_1008\wholebrain_output.mat'
+    }
+
     # 触发文件处理参数
     IPD = 5                    # 刺激呈现时长(s)
     ISI = 5                    # 刺激间隔(s)
@@ -54,9 +66,10 @@ class Config:
     
     # 快速RR筛选参数
     EFFECT_SIZE_THRESHOLD = 0.5   # 效应大小阈值
-    SNR_THRESHOLD = 1.0          # 信噪比阈值
+    SNR_THRESHOLD = 0.9          # 信噪比阈值
     RESPONSE_RATIO_THRESHOLD = 0.4  # 响应比例阈值
-    
+    # SNR_THRESHOLD = 0.9          # 信噪比阈值
+    # RESPONSE_RATIO_THRESHOLD = 0.6  # 响应比例阈值
     # 分类参数
     TEST_SIZE = 0.3           # 测试集比例
     RANDOM_STATE = 42         # 随机种子
@@ -258,7 +271,7 @@ def process_trigger(txt_file, IPD=cfg.IPD, ISI=cfg.ISI, fre=None, min_sti_gap=cf
         'stimuli_count': len(start_edge)
     }
 
-# %% 加载数据
+# %% 加载数据 (新版)
 def load_data(data_path, start_idx=cfg.TRIAL_START_SKIP, end_idx=cfg.TRIAL_START_SKIP + cfg.TOTAL_TRIALS, interactive = True):
     ######### 读取神经数据 #########
     if interactive:
@@ -323,6 +336,44 @@ def load_data(data_path, start_idx=cfg.TRIAL_START_SKIP, end_idx=cfg.TRIAL_START
     
     return neuron_data, neuron_pos, start_edges, stimulus_data
 
+# %% 加载数据 (旧版)
+def load_old_version_data(neurons_mat_path, trials_mat_path, location_mat_path):
+    """
+    读取旧版 .mat 格式的神经元数据、试次数据和位置数据。
+    代码逻辑源自 code_old_version.py。
+    """
+    print("--- 开始加载旧版数据 ---")
+    
+    # 1. 读取神经元索引和预分割的试次数据
+    print(f"正在读取: {neurons_mat_path} 和 {trials_mat_path}")
+    try:
+        neuron_data_mat = scipy.io.loadmat(neurons_mat_path)
+        neuron_index = neuron_data_mat['rr_neurons'].flatten()
+        
+        trial_data_mat = scipy.io.loadmat(trials_mat_path)
+        trials = trial_data_mat['trials']
+        labels = trial_data_mat['labels'].ravel()
+        
+        print(f"数据加载完成：载入 {trials.shape[0]} 个试次，每个试次包含 {trials.shape[1]} 个神经元，时间点为 {trials.shape[2]}。")
+        print(f"其中，预筛选出的神经元索引数量为: {len(neuron_index)}")
+    except Exception as e:
+        raise ValueError(f"读取神经元或试次 .mat 文件失败: {e}")
+
+    # 2. 读取神经元位置信息
+    print(f"正在读取位置数据: {location_mat_path}")
+    try:
+        with h5py.File(location_mat_path, 'r') as f:
+            # 检查 'whole_center' 是否存在
+            if 'whole_center' not in f:
+                raise ValueError("mat文件中缺少必要的数据集 'whole_center'")
+            location = np.array(f['whole_center'])
+        print(f"位置数据加载完成：找到 {location.shape[1]} 个神经元的坐标。")
+    except Exception as e:
+        raise ValueError(f"读取位置 .mat 文件失败: {e}")
+        
+    print("--- 旧版数据加载成功 ---")
+    return neuron_index, trials, labels, location
+
 # %% 预处理函数
 def preprocess_neural_data(segments, labels, method='comprehensive'):
     """
@@ -358,7 +409,7 @@ def preprocess_neural_data(segments, labels, method='comprehensive'):
     baseline_period = np.arange(0, cfg.T_STIMULUS)
     if len(baseline_period) > 0:
         baseline_data = valid_segments[:, :, baseline_period]
-        baseline_mean = np.mean(baseline_data, axis=2, keepdims=True)  # (trials, neurons, 1)
+        baseline_mean = np.mean(baseline_data, axis=2, keepdims=True)
         baseline_std = np.std(baseline_data, axis=2, keepdims=True) + 1e-8
         
         # 避免除零和NaN错误
@@ -577,7 +628,7 @@ def improved_classification(X, y, test_size=0.3, enable_multiple=True):
         'best_cv_std': results[best_model]['cv_std']
     }
 
-# %% ========== 可视化函数 ==========
+# %% ========== 可视化函数 ========== 
 
 def setup_plot_style():
     """设置科研绘图风格"""
@@ -698,7 +749,7 @@ def visualize_roc_curves(X, y, models_dict, save_path=None):
     from sklearn.model_selection import train_test_split
     from sklearn.metrics import roc_curve, auc
     from sklearn.preprocessing import label_binarize
-    from scipy import interp
+    # 移除不必要的scipy.interp导入，该函数中未使用
     from itertools import cycle
     
     setup_plot_style()
@@ -1021,7 +1072,7 @@ def visualize_stimulus_data_distribution(stimulus_data, title="Stimulus Data Dis
         cat_mask = categories == cat
         cat_trials = trial_indices[cat_mask]
         ax4.scatter(cat_trials, np.full_like(cat_trials, cat), 
-                   c=colors_cat[i], s=40, alpha=0.7, 
+                   color=colors_cat[i], s=40, alpha=0.7, 
                    edgecolors='black', linewidth=0.5, label=f'Category {int(cat)}')
     
     ax4.set_xlabel('Trial Index')
@@ -1037,7 +1088,7 @@ def visualize_stimulus_data_distribution(stimulus_data, title="Stimulus Data Dis
         int_mask = intensities == intensity
         int_trials = trial_indices[int_mask]
         ax5.scatter(int_trials, np.full_like(int_trials, intensity),
-                   c=colors_int[i], s=40, alpha=0.7,
+                   color=colors_int[i], s=40, alpha=0.7,
                    edgecolors='black', linewidth=0.5, label=f'Intensity {intensity}')
     
     ax5.set_xlabel('Trial Index')
@@ -1232,7 +1283,7 @@ def save_rr_neurons_distribution(neuron_pos, rr_results, save_dir='results'):
     )
     print(f"RR神经元分布统计信息已保存到 {save_dir}/rr_neurons_distribution.npz")
 
-# %% ========== 数据分割函数 ==========
+# %% ========== 数据分割函数 ========== 
 def segment_neuron_data(neuron_data, trigger_data, stimulus_data, pre_frames=cfg.PRE_FRAMES, post_frames=cfg.POST_FRAMES, baseline_correct=cfg.BASELINE_CORRECT):
     """
     改进的数据分割函数
@@ -1271,7 +1322,7 @@ def segment_neuron_data(neuron_data, trigger_data, stimulus_data, pre_frames=cfg
         
     return segments, labels
 
-# %% ========== 标签处理函数 ==========
+# %% ========== 标签处理函数 ========== 
 def reclassify_labels(stimulus_data):
     """重新分类标签：类别1和2强度为1的作为第3类"""
     new_labels = []
@@ -1290,7 +1341,7 @@ def reclassify_labels(stimulus_data):
     
     return np.array(new_labels)
 
-# %% ========== RR神经元筛选函数 ==========
+# %% ========== RR神经元筛选函数 ========== 
 def fast_rr_selection(trials, labels, t_stimulus=cfg.T_STIMULUS, l=cfg.L_STIMULUS, 
                      alpha_fdr=cfg.ALPHA_FDR, alpha_level=cfg.ALPHA_LEVEL, 
                      reliability_threshold=cfg.RELIABILITY_THRESHOLD):
@@ -1371,7 +1422,7 @@ def fast_rr_selection(trials, labels, t_stimulus=cfg.T_STIMULUS, l=cfg.L_STIMULU
         'processing_time': elapsed_time
     }
 
-# %% ========== 时间点分析函数 ==========
+# %% ========== 时间点分析函数 ========== 
 def classify_by_timepoints(segments, labels, rr_neurons, pre_frames=cfg.PRE_FRAMES, 
                           post_frames=cfg.POST_FRAMES, window_size=1, step_size=1):
     """
@@ -1753,7 +1804,7 @@ def visualize_neuron_count_effect(neuron_counts, accuracies, accuracy_stds,
         print(f"Neuron count effect plot saved to: {save_path}")
     plt.show()
 
-# %% ========== Fisher信息分析函数 ==========
+# %% ========== Fisher信息分析函数 ========== 
 def calculate_fisher_information(segments, labels, rr_neurons):
     """
     计算每个时间点的Fisher信息，用于衡量类别可分离性
@@ -2152,7 +2203,7 @@ def visualize_fisher_comparison(fisher_data_dict, save_path=None):
     plt.show()
 
 
-# %% ========== 神经元数量对性能影响分析 ==========
+# %% ========== 神经元数量对性能影响分析 ========== 
 
 def analyze_neuron_count_effect(segments, labels, rr_neurons, time_start=20, time_end=30, 
                                neuron_counts=None, n_iterations=10):
@@ -2550,16 +2601,45 @@ def run_neuron_count_analysis_if_requested(segments, new_labels, rr_neurons, ena
     return results
 
 
-# %% ========== 主脚本 ==========
+# %% ========== 主脚本 ========== 
 if __name__ == '__main__':
     print("start neuron data processing!") 
     
     # %% 加载数据
-    neuron_data, neuron_pos, trigger_data, stimulus_data = load_data(cfg.DATA_PATH)
+    if cfg.LOADER_VERSION == 'new':
+        neuron_data, neuron_pos, trigger_data, stimulus_data = load_data(cfg.DATA_PATH)
+    elif cfg.LOADER_VERSION == 'old':
+        neuron_index, segments, labels, neuron_pos_old = load_old_version_data(
+            cfg.OLD_VERSION_PATHS['neurons'],
+            cfg.OLD_VERSION_PATHS['trials'],
+            cfg.OLD_VERSION_PATHS['location']
+        )
+        # 对于旧版数据，需要将加载的segments和labels转换为新版接口的格式
+        # 假设旧版segments已经是 (trials, neurons, timepoints) 格式
+        # 并且 labels 已经是处理好的标签
+        # neuron_data 和 trigger_data 需要从 segments 和 labels 中反推或简化处理
+        # 这里为了兼容性，我们假设旧版数据直接提供了 segments, labels, neuron_pos
+        # 并且 neuron_data 和 trigger_data 可以从 segments 中提取或不再需要
+        # 实际应用中，可能需要更复杂的转换逻辑
+        neuron_data = np.mean(segments, axis=2) # 简化处理，仅为兼容后续函数签名
+        trigger_data = np.arange(segments.shape[0]) # 简化处理
+        stimulus_data = np.zeros((segments.shape[0], 2)) # 简化处理
+        # 更新全局的segments和labels，以便后续函数使用
+        # 注意：这里直接覆盖了，如果旧版数据和新版数据处理流程差异大，需要更细致的逻辑
+        segments = segments
+        new_labels = labels # 旧版数据假设标签已处理
+        neuron_pos = neuron_pos_old[0:2, :] # 提取前两维
+        print("已切换到旧版数据加载模式，部分可视化和分析可能需要调整")
+    else:
+        raise ValueError("无效的 LOADER_VERSION 配置")
+
     
     # %% 可视化原始数据
     print("\n=== 原始数据可视化 ===")
     os.makedirs('results/figures', exist_ok=True)
+    
+    # 设置科研绘图风格
+    setup_plot_style()
     
     # 神经活动热图
     visualize_neural_activity_heatmap(neuron_data, "Neural Activity Heatmap", 
@@ -2584,16 +2664,36 @@ if __name__ == '__main__':
     print(f"neuron_data形状: {neuron_data.shape}")
     print(f"neuron_data[0:5, 0:3]: \n{neuron_data[0:5, 0:3]}")
     
-    segments, labels = segment_neuron_data(neuron_data, trigger_data, stimulus_data)
+    # 如果是旧版数据，segments和new_labels已经加载，跳过重新分割和标签重分类
+    if cfg.LOADER_VERSION == 'new':
+        segments, labels = segment_neuron_data(neuron_data, trigger_data, stimulus_data)
+        # 重新分类标签：类别1和2强度为1的作为第3类
+        new_labels = reclassify_labels(stimulus_data)
     
+    print(f"标签分布: {np.unique(new_labels, return_counts=True)}")
+
     # %% 保存示例神经元统计
     # 保存单个神经元统计信息作为示例
-    save_single_neuron_stats(14858, [10, 20, 30], segments, save_dir='results')
-    
-    # 重新分类标签：类别1和2强度为1的作为第3类
-    new_labels = reclassify_labels(stimulus_data)
-    print(f"标签分布: {np.unique(new_labels, return_counts=True)}")
-    
+    # 确保 segments 和 new_labels 在这里可用
+    if 'segments' in locals() and 'new_labels' in locals():
+        # 找到一个有效的神经元索引进行保存
+        if segments.shape[1] > 0:
+            example_neuron_idx = 0 # 使用第一个神经元作为示例
+            # 找到一些有效的试次索引
+            valid_trial_indices = np.where(new_labels != 0)[0]
+            if len(valid_trial_indices) > 3:
+                example_trials_idx = valid_trial_indices[:3].tolist() # 取前3个有效试次
+            elif len(valid_trial_indices) > 0:
+                example_trials_idx = valid_trial_indices.tolist() # 取所有有效试次
+            else:
+                example_trials_idx = [0] # 如果没有有效试次，就用第一个试次
+            
+            save_single_neuron_stats(example_neuron_idx, example_trials_idx, segments, save_dir='results')
+        else:
+            print("没有神经元数据，跳过保存示例神经元统计")
+    else:
+        print("segments 或 new_labels 未定义，跳过保存示例神经元统计")
+
     # %% RR神经元提取
     print("\n开始RR神经元筛选...")
     # 导入RR神经元筛选模块
@@ -2750,6 +2850,19 @@ if __name__ == '__main__':
                 print("\n=== 分类效果可视化 ===")
                 visualize_classification_performance(improved_results, 
                                                    save_path='results/figures/classification_performance.png')
+                
+                # 可视化ROC曲线
+                print("生成ROC曲线...")
+                # 重新训练模型用于ROC曲线绘制
+                classifiers_for_roc = {
+                    'SVM': SVC(kernel='rbf', class_weight='balanced', random_state=cfg.RANDOM_STATE, probability=True),
+                    'RandomForest': RandomForestClassifier(n_estimators=100, class_weight='balanced', 
+                                                         random_state=cfg.RANDOM_STATE, max_depth=10),
+                    'GradientBoosting': GradientBoostingClassifier(n_estimators=100, random_state=cfg.RANDOM_STATE),
+                    'LogisticRegression': LogisticRegression(class_weight='balanced', random_state=cfg.RANDOM_STATE, max_iter=1000)
+                }
+                visualize_roc_curves(balanced_X, balanced_y, classifiers_for_roc,
+                                   save_path='results/figures/roc_curves.png')
             else:
                 print(f"预处理方法准确率: {improved_results['best_cv_mean']:.3f} ± {improved_results['best_cv_std']:.3f}")
                 improvement = improved_results['best_cv_mean'] - original_results['best_cv_mean']
@@ -2783,6 +2896,12 @@ if __name__ == '__main__':
         print("\n=== Fisher信息可视化 ===")
         visualize_fisher_information(fisher_scores, np.arange(len(fisher_scores)),
                                    save_path='results/figures/fisher_information.png')
+        
+        # 可视化Fisher信息热图
+        print("生成Fisher信息热图...")
+        visualize_fisher_heatmap(segments, new_labels, rr_results['rr_neurons'],
+                               time_window=(cfg.PRE_FRAMES, cfg.PRE_FRAMES + cfg.STIMULUS_DURATION),
+                               save_path='results/figures/fisher_heatmap.png')
         
         # 可视化组合分析
         print("\n=== 组合分析可视化 ===")  
@@ -2822,8 +2941,10 @@ if __name__ == '__main__':
     
     if len(rr_results['rr_neurons']) > 0:
         print("- classification_performance.png: 分类性能对比")
+        print("- roc_curves.png: ROC曲线分析")
         print("- accuracy_over_time.png: 时间点分类准确率")
         print("- fisher_information.png: Fisher信息分析")
+        print("- fisher_heatmap.png: Fisher信息热图")
         print("- combined_analysis.png: 准确率与Fisher信息组合分析")
         
         if len(rr_results['rr_neurons']) >= 10:

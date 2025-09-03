@@ -1,7 +1,7 @@
-# 神经数据降维分析
+# 神经数据t-SNE降维分析
 # guiy24@mails.tsinghua.edu.cn
-# 2025-08-27
-# PCA, t-SNE数据分析，并且准备数据用CEBRA运行
+# 2025-09-03
+# 专注于t-SNE降维分析和科研风格可视化
 
 # %% 导入必要的库
 import numpy as np
@@ -12,6 +12,10 @@ from sklearn.manifold import TSNE
 from sklearn.preprocessing import StandardScaler
 import pandas as pd
 import os
+from matplotlib.patches import Ellipse
+from scipy import stats
+import warnings
+warnings.filterwarnings('ignore')
 
 # 从loaddata.py导入函数
 from loaddata import (
@@ -163,6 +167,303 @@ def get_color_by_intensity(category, intensity):
         color = color_dict['high']  # 高饱和度（深色）
     
     return color
+
+def setup_scientific_plot_style():
+    """设置科研论文风格的绘图参数"""
+    plt.style.use('default')
+    
+    # 设置字体和大小
+    plt.rcParams.update({
+        'font.size': 12,
+        'axes.titlesize': 14,
+        'axes.labelsize': 13,
+        'xtick.labelsize': 11,
+        'ytick.labelsize': 11,
+        'legend.fontsize': 11,
+        'figure.titlesize': 16,
+        'font.family': 'Arial',
+        'axes.linewidth': 1.2,
+        'axes.spines.top': False,
+        'axes.spines.right': False,
+        'xtick.major.size': 6,
+        'ytick.major.size': 6,
+        'xtick.minor.size': 3,
+        'ytick.minor.size': 3,
+        'legend.frameon': False,
+        'figure.dpi': 300,
+        'savefig.dpi': 300,
+        'savefig.bbox': 'tight'
+    })
+
+def plot_tsne_scientific(X_tsne, labels, stimulus_data, save_path=None, title="t-SNE Analysis"):
+    """
+    科研风格的t-SNE可视化
+    
+    参数:
+    X_tsne: t-SNE降维结果 (n_samples, 2)
+    labels: 类别标签
+    stimulus_data: 刺激数据 (包含类别和强度信息)
+    save_path: 保存路径
+    title: 图标题
+    """
+    setup_scientific_plot_style()
+    
+    # 创建图形
+    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(16, 12))
+    fig.suptitle(title, fontsize=16, y=0.95)
+    
+    # 准备数据
+    unique_labels = np.unique(labels)
+    n_categories = len(unique_labels)
+    
+    # 定义科研风格的颜色方案
+    category_colors = {
+        1: {'color': '#E31A1C', 'name': 'Category 1'},  # 红色
+        2: {'color': '#1F78B4', 'name': 'Category 2'},  # 蓝色  
+        3: {'color': '#33A02C', 'name': 'Category 3'}   # 绿色
+    }
+    
+    # 子图1: 按类别着色
+    ax1.set_title('A. t-SNE by Category', fontweight='bold', loc='left')
+    for i, label in enumerate(unique_labels):
+        mask = labels == label
+        if np.sum(mask) > 0:
+            color_info = category_colors.get(label, {'color': 'gray', 'name': f'Category {label}'})
+            ax1.scatter(X_tsne[mask, 0], X_tsne[mask, 1], 
+                       c=color_info['color'], 
+                       alpha=0.7, 
+                       s=30, 
+                       label=color_info['name'],
+                       edgecolors='white',
+                       linewidths=0.5)
+    
+    ax1.set_xlabel('t-SNE 1')
+    ax1.set_ylabel('t-SNE 2')
+    ax1.legend(loc='upper right', frameon=True, fancybox=False, shadow=False)
+    ax1.grid(True, alpha=0.3, linewidth=0.5)
+    
+    # 子图2: 按强度着色（如果有强度信息）
+    ax2.set_title('B. t-SNE by Intensity', fontweight='bold', loc='left')
+    if stimulus_data.shape[1] > 1:
+        intensities = stimulus_data[:, 1]
+        unique_intensities = np.unique(intensities)
+        
+        # 使用连续颜色映射
+        cmap = plt.cm.viridis
+        scatter = ax2.scatter(X_tsne[:, 0], X_tsne[:, 1], 
+                             c=intensities, 
+                             cmap=cmap,
+                             alpha=0.7, 
+                             s=30,
+                             edgecolors='white',
+                             linewidths=0.5)
+        
+        cbar = plt.colorbar(scatter, ax=ax2, shrink=0.8)
+        cbar.set_label('Stimulus Intensity', rotation=270, labelpad=15)
+    else:
+        ax2.text(0.5, 0.5, 'No intensity data available', 
+                transform=ax2.transAxes, ha='center', va='center')
+    
+    ax2.set_xlabel('t-SNE 1')
+    ax2.set_ylabel('t-SNE 2')
+    ax2.grid(True, alpha=0.3, linewidth=0.5)
+    
+    # 子图3: 密度图
+    ax3.set_title('C. Data Point Density', fontweight='bold', loc='left')
+    
+    # 创建2D直方图密度图
+    hist, xedges, yedges = np.histogram2d(X_tsne[:, 0], X_tsne[:, 1], bins=50, density=True)
+    extent = [xedges[0], xedges[-1], yedges[0], yedges[-1]]
+    
+    im = ax3.imshow(hist.T, extent=extent, origin='lower', cmap='Blues', alpha=0.8)
+    ax3.scatter(X_tsne[:, 0], X_tsne[:, 1], alpha=0.4, s=8, c='red', edgecolors='none')
+    
+    cbar3 = plt.colorbar(im, ax=ax3, shrink=0.8)
+    cbar3.set_label('Density', rotation=270, labelpad=15)
+    
+    ax3.set_xlabel('t-SNE 1')
+    ax3.set_ylabel('t-SNE 2')
+    
+    # 子图4: 类别分离统计
+    ax4.set_title('D. Category Separation Analysis', fontweight='bold', loc='left')
+    
+    # 计算类别间的距离统计
+    category_stats = []
+    for label in unique_labels:
+        mask = labels == label
+        if np.sum(mask) > 0:
+            data_points = X_tsne[mask]
+            # 计算类内距离
+            centroid = np.mean(data_points, axis=0)
+            intra_distances = np.sqrt(np.sum((data_points - centroid)**2, axis=1))
+            
+            category_stats.append({
+                'category': label,
+                'centroid': centroid,
+                'intra_mean': np.mean(intra_distances),
+                'intra_std': np.std(intra_distances),
+                'n_points': len(data_points)
+            })
+    
+    # 绘制统计信息
+    categories = [stat['category'] for stat in category_stats]
+    intra_means = [stat['intra_mean'] for stat in category_stats]
+    intra_stds = [stat['intra_std'] for stat in category_stats]
+    
+    x_pos = np.arange(len(categories))
+    bars = ax4.bar(x_pos, intra_means, yerr=intra_stds, 
+                   capsize=5, alpha=0.7, 
+                   color=[category_colors.get(cat, {'color': 'gray'})['color'] for cat in categories])
+    
+    ax4.set_xlabel('Category')
+    ax4.set_ylabel('Intra-cluster Distance')
+    ax4.set_xticks(x_pos)
+    ax4.set_xticklabels([f'Cat {cat}' for cat in categories])
+    ax4.grid(True, axis='y', alpha=0.3, linewidth=0.5)
+    
+    # 添加数值标签
+    for i, (bar, mean_val, std_val) in enumerate(zip(bars, intra_means, intra_stds)):
+        ax4.text(bar.get_x() + bar.get_width()/2., bar.get_height() + std_val + 0.1,
+                f'{mean_val:.2f}±{std_val:.2f}', 
+                ha='center', va='bottom', fontsize=10)
+    
+    plt.tight_layout()
+    
+    # 保存图形
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight', 
+                   facecolor='white', edgecolor='none')
+        print(f"t-SNE科研风格图已保存: {save_path}")
+    
+    plt.show()
+    
+    return category_stats
+
+def plot_tsne_publication_figure(X_tsne, labels, stimulus_data, save_path=None):
+    """
+    生成适合论文发表的t-SNE单一主图
+    
+    参数:
+    X_tsne: t-SNE降维结果
+    labels: 类别标签
+    stimulus_data: 刺激数据
+    save_path: 保存路径
+    """
+    setup_scientific_plot_style()
+    
+    fig, ax = plt.subplots(1, 1, figsize=(8, 6))
+    
+    # 准备数据和颜色
+    unique_labels = np.unique(labels)
+    category_colors = {
+        1: {'color': '#E31A1C', 'marker': 'o', 'name': 'Category 1'},
+        2: {'color': '#1F78B4', 'marker': 's', 'name': 'Category 2'},
+        3: {'color': '#33A02C', 'marker': '^', 'name': 'Category 3'}
+    }
+    
+    # 绘制散点图
+    for label in unique_labels:
+        mask = labels == label
+        if np.sum(mask) > 0:
+            color_info = category_colors.get(label, {
+                'color': 'gray', 'marker': 'o', 'name': f'Category {label}'
+            })
+            
+            ax.scatter(X_tsne[mask, 0], X_tsne[mask, 1],
+                      c=color_info['color'],
+                      marker=color_info['marker'],
+                      alpha=0.8,
+                      s=50,
+                      label=color_info['name'],
+                      edgecolors='white',
+                      linewidths=0.8)
+    
+    # 设置坐标轴
+    ax.set_xlabel('t-SNE Component 1', fontsize=13)
+    ax.set_ylabel('t-SNE Component 2', fontsize=13)
+    
+    # 添加图例
+    legend = ax.legend(loc='upper right', frameon=True, fancybox=False, 
+                      shadow=False, fontsize=11)
+    legend.get_frame().set_facecolor('white')
+    legend.get_frame().set_alpha(0.9)
+    
+    # 设置网格
+    ax.grid(True, alpha=0.3, linewidth=0.5)
+    
+    # 移除顶部和右侧边框
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    
+    # 设置坐标轴样式
+    ax.tick_params(axis='both', which='major', labelsize=11, 
+                  length=6, width=1.2, color='black')
+    
+    plt.tight_layout()
+    
+    # 保存图形
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight',
+                   facecolor='white', edgecolor='none')
+        print(f"论文级t-SNE图已保存: {save_path}")
+    
+    plt.show()
+
+def calculate_tsne_metrics(X_tsne, labels):
+    """
+    计算t-SNE结果的量化指标
+    
+    参数:
+    X_tsne: t-SNE降维结果
+    labels: 类别标签
+    
+    返回:
+    metrics: 包含各种指标的字典
+    """
+    from sklearn.metrics import silhouette_score, adjusted_rand_score
+    from sklearn.cluster import KMeans
+    
+    metrics = {}
+    
+    # 轮廓系数
+    if len(np.unique(labels)) > 1:
+        silhouette = silhouette_score(X_tsne, labels)
+        metrics['silhouette_score'] = silhouette
+        print(f"轮廓系数 (Silhouette Score): {silhouette:.3f}")
+    
+    # 类别间分离度
+    unique_labels = np.unique(labels)
+    centroids = {}
+    intra_variances = {}
+    
+    for label in unique_labels:
+        mask = labels == label
+        if np.sum(mask) > 0:
+            data_points = X_tsne[mask]
+            centroid = np.mean(data_points, axis=0)
+            centroids[label] = centroid
+            
+            # 类内方差
+            intra_var = np.mean(np.sum((data_points - centroid)**2, axis=1))
+            intra_variances[label] = intra_var
+    
+    # 计算类间距离
+    inter_distances = []
+    for i, label1 in enumerate(unique_labels):
+        for j, label2 in enumerate(unique_labels):
+            if i < j:
+                dist = np.sqrt(np.sum((centroids[label1] - centroids[label2])**2))
+                inter_distances.append(dist)
+    
+    metrics['mean_inter_distance'] = np.mean(inter_distances)
+    metrics['mean_intra_variance'] = np.mean(list(intra_variances.values()))
+    metrics['separation_ratio'] = metrics['mean_inter_distance'] / metrics['mean_intra_variance']
+    
+    print(f"平均类间距离: {metrics['mean_inter_distance']:.3f}")
+    print(f"平均类内方差: {metrics['mean_intra_variance']:.3f}")
+    print(f"分离比率: {metrics['separation_ratio']:.3f}")
+    
+    return metrics
 
 def save_manifold_2d_data(X_reduced, labels, stimulus_data, title="2D Manifold", save_dir="results"):
     """
@@ -599,14 +900,26 @@ def save_data_for_cebra(X, labels, save_path):
 
 # %% 主脚本
 if __name__ == "__main__":
-    print("=== 神经活动降维分析脚本 ===")
+    print("=== 神经活动t-SNE降维分析脚本 ===")
     
     # %% 数据加载与预处理
     print("\n1. 数据加载...")
-    neuron_data, neuron_pos, trigger_data, stimulus_data = load_data(cfg.DATA_PATH)
-    
-    # 数据分割
-    segments, labels = segment_neuron_data(neuron_data, trigger_data, stimulus_data)
+    if cfg.LOADER_VERSION == 'new':
+        neuron_data, neuron_pos, trigger_data, stimulus_data = load_data(cfg.DATA_PATH)
+        segments, labels = segment_neuron_data(neuron_data, trigger_data, stimulus_data)
+    elif cfg.LOADER_VERSION == 'old':
+        from loaddata import load_old_version_data
+        neuron_index, segments, labels, neuron_pos = load_old_version_data(
+            cfg.OLD_VERSION_PATHS['neurons'],
+            cfg.OLD_VERSION_PATHS['trials'],
+            cfg.OLD_VERSION_PATHS['location']
+        )
+        # 对于旧版数据，需要创建兼容的stimulus_data
+        stimulus_data = np.column_stack([labels, np.zeros(len(labels))])  # 简化处理
+        neuron_pos = neuron_pos[0:2, :] if neuron_pos.shape[0] >= 2 else neuron_pos
+        print("已切换到旧版数据加载模式")
+    else:
+        raise ValueError("无效的 LOADER_VERSION 配置")
     
     # 使用原始标签（第一列类别）作为降维标签
     original_labels = stimulus_data[:, 0]  # 第一列是类别
@@ -621,78 +934,142 @@ if __name__ == "__main__":
     # 准备降维数据 - 使用原始类别标签和刺激时间段
     X, y = prepare_data_for_manifold(segments, original_labels, rr_neurons, use_stimulus_only=True)
     
-    # %% 数据降维分析
-    print("\n3. 降维分析...")
+    # %% t-SNE降维分析
+    print("\n3. t-SNE降维分析...")
     
-    # PCA降维
-    X_pca, pca = perform_pca(X, n_components=3)
+    # 首先进行PCA预降维以提高t-SNE效果
+    print("执行PCA预降维...")
+    X_pca, pca = perform_pca(X, n_components=min(50, X.shape[1]//2))
     
-    # t-SNE降维
-    X_tsne = perform_tsne(X, n_components=2)
+    # t-SNE降维（使用PCA预处理的数据）
+    print("执行t-SNE降维...")
+    X_tsne = perform_tsne(X_pca, n_components=2)
     
-    # %% 保存降维结果数据
-    print("\n4. 保存降维结果数据...")
+    # %% 科研风格可视化
+    print("\n4. 生成科研风格可视化...")
     
-    # 创建结果保存目录
-    manifold_results_dir = os.path.join(cfg.DATA_PATH, 'results')
-    os.makedirs(manifold_results_dir, exist_ok=True)
+    # 创建图片保存目录
+    figures_dir = os.path.join(cfg.DATA_PATH if hasattr(cfg, 'DATA_PATH') else 'results', 'manifold_results')
+    os.makedirs(figures_dir, exist_ok=True)
     
-    # 保存PCA 3D结果数据
-    save_manifold_3d_data(X_pca, y, stimulus_data, title="PCA 3D Manifold", save_dir=manifold_results_dir)
-    
-    # 保存PCA 2D结果数据（前两个主成分）
-    save_manifold_2d_data(X_pca[:, :2], y, stimulus_data, title="PCA 2D Manifold", save_dir=manifold_results_dir)
-    
-    # 保存t-SNE 2D结果数据
-    save_manifold_2d_data(X_tsne, y, stimulus_data, title="t-SNE 2D Manifold", save_dir=manifold_results_dir)
-    
-    # %% 专业CEBRA数据准备和保存
-    print("\n5. 准备CEBRA数据...")
-    
-    # 为CEBRA准备专业格式的数据
-    cebra_data = prepare_cebra_data(
-        segments=segments, 
-        stimulus_data=stimulus_data, 
-        rr_neurons=rr_neurons, 
-        use_stimulus_only=True
+    # 生成综合分析图
+    scientific_plot_path = os.path.join(figures_dir, 'tsne_scientific_analysis.png')
+    category_stats = plot_tsne_scientific(
+        X_tsne, y, stimulus_data, 
+        save_path=scientific_plot_path,
+        title="Neural Population t-SNE Analysis"
     )
     
-    # 保存CEBRA数据到专门目录
-    cebra_save_dir = os.path.join(cfg.DATA_PATH, 'cebra_data')
-    save_cebra_data(cebra_data, cebra_save_dir)
+    # 生成论文级主图
+    publication_plot_path = os.path.join(figures_dir, 'tsne_publication_figure.png')
+    plot_tsne_publication_figure(
+        X_tsne, y, stimulus_data,
+        save_path=publication_plot_path
+    )
     
-    # %% 传统降维数据保存（向后兼容）
-    print("\n6. 保存传统降维数据...")
+    # %% 量化分析
+    print("\n5. t-SNE结果量化分析...")
+    tsne_metrics = calculate_tsne_metrics(X_tsne, y)
     
-    # 保存降维结果和原始数据到results目录
-    save_dir = os.path.join(cfg.DATA_PATH, 'results')
+    # %% 保存分析结果和数据
+    print("\n6. 保存分析结果...")
     
-    # 保存PCA结果
-    save_data_for_cebra(X_pca, y, os.path.join(save_dir, 'pca_data.npz'))
+    # 创建结果保存目录
+    results_dir = os.path.join(cfg.DATA_PATH if hasattr(cfg, 'DATA_PATH') else 'results', 'manifold_results')
+    os.makedirs(results_dir, exist_ok=True)
     
-    # 保存t-SNE结果
-    save_data_for_cebra(X_tsne, y, os.path.join(save_dir, 'tsne_data.npz'))
+    # 保存t-SNE结果数据
+    save_manifold_2d_data(X_tsne, y, stimulus_data, title="t-SNE Neural Manifold", save_dir=results_dir)
     
-    # 保存原始高维数据
-    save_data_for_cebra(X, y, os.path.join(save_dir, 'original_high_dim_data.npz'))
-    
-    # 保存降维分析统计信息
+    # 保存分析统计信息
     analysis_stats = {
+        # PCA预处理信息
         'pca_explained_variance_ratio': pca.explained_variance_ratio_,
         'pca_total_explained_variance': np.sum(pca.explained_variance_ratio_),
-        'pca_components': pca.components_,
+        'pca_n_components': X_pca.shape[1],
+        
+        # t-SNE结果信息
+        'tsne_n_components': X_tsne.shape[1],
+        'tsne_perplexity': mfg.TSNE_PERPLEXITY,
+        'tsne_learning_rate': mfg.TSNE_LEARNING_RATE,
+        'tsne_max_iter': mfg.TSNE_MAX_ITER,
+        
+        # 数据信息
         'original_features': X.shape[1],
-        'pca_features': X_pca.shape[1],
-        'tsne_features': X_tsne.shape[1],
         'n_samples': X.shape[0],
+        'n_categories': len(np.unique(y)),
+        'categories': np.unique(y).tolist(),
+        'category_counts': np.unique(y, return_counts=True)[1].tolist(),
+        
+        # 神经元信息
         'rr_neurons': rr_neurons if rr_neurons is not None else 'all',
-        'n_rr_neurons': len(rr_neurons) if rr_neurons is not None else neural_data.shape[1]
+        'n_rr_neurons': len(rr_neurons) if rr_neurons is not None else X.shape[1],
+        'used_rr_only': rr_neurons is not None,
+        
+        # 量化指标
+        'tsne_metrics': tsne_metrics,
+        'category_statistics': category_stats
     }
     
     np.savez_compressed(
-        os.path.join(save_dir, 'manifold_analysis_stats.npz'),
+        os.path.join(results_dir, 'tsne_analysis_complete.npz'),
+        X_original=X,
+        X_pca=X_pca,
+        X_tsne=X_tsne,
+        labels=y,
+        stimulus_data=stimulus_data,
         **analysis_stats
     )
-    print("降维分析统计信息已保存")
     
-    print("\n=== 降维分析完成 ===")   
+    # 保存简化的t-SNE数据（向后兼容）
+    save_data_for_cebra(X_tsne, y, os.path.join(results_dir, 'tsne_data.npz'))
+    
+    print("t-SNE分析统计信息已保存")
+    
+    # %% 生成文本报告
+    print("\n7. 生成分析报告...")
+    
+    report_path = os.path.join(results_dir, 'tsne_analysis_report.txt')
+    with open(report_path, 'w', encoding='utf-8') as f:
+        f.write("="*60 + "\n")
+        f.write("神经群体t-SNE降维分析报告\n")
+        f.write("="*60 + "\n\n")
+        
+        f.write("数据概览:\n")
+        f.write(f"- 原始数据维度: {X.shape[0]} 样本 × {X.shape[1]} 特征\n")
+        f.write(f"- PCA预降维: {X_pca.shape[1]} 个主成分 (解释方差: {np.sum(pca.explained_variance_ratio_):.1%})\n")
+        f.write(f"- t-SNE最终维度: 2维\n")
+        f.write(f"- 类别数量: {len(np.unique(y))} ({np.unique(y).tolist()})\n")
+        f.write(f"- 使用神经元: {'RR神经元' if rr_neurons is not None else '所有神经元'}\n\n")
+        
+        f.write("t-SNE参数:\n")
+        f.write(f"- Perplexity: {mfg.TSNE_PERPLEXITY}\n")
+        f.write(f"- Learning Rate: {mfg.TSNE_LEARNING_RATE}\n")
+        f.write(f"- Max Iterations: {mfg.TSNE_MAX_ITER}\n\n")
+        
+        f.write("量化指标:\n")
+        for key, value in tsne_metrics.items():
+            f.write(f"- {key}: {value:.3f}\n")
+        f.write("\n")
+        
+        f.write("类别统计:\n")
+        for stat in category_stats:
+            f.write(f"- 类别 {stat['category']}: {stat['n_points']} 个样本\n")
+            f.write(f"  类内平均距离: {stat['intra_mean']:.3f} ± {stat['intra_std']:.3f}\n")
+        f.write("\n")
+        
+        f.write("生成文件:\n")
+        f.write(f"- 科研分析图: tsne_scientific_analysis.png\n")
+        f.write(f"- 论文级主图: tsne_publication_figure.png\n")
+        f.write(f"- 完整数据: tsne_analysis_complete.npz\n")
+        f.write(f"- 简化数据: tsne_data.npz\n")
+        
+    print(f"分析报告已保存: {report_path}")
+    
+    print("\n=== t-SNE降维分析完成 ===")
+    print(f"结果保存位置: {results_dir}")
+    print("主要输出:")
+    print(f"  - 科研风格综合分析图: {scientific_plot_path}")
+    print(f"  - 论文级发表图: {publication_plot_path}")
+    print(f"  - 完整分析数据: {os.path.join(results_dir, 'tsne_analysis_complete.npz')}")
+    print(f"  - 分析报告: {report_path}")   

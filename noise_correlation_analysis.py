@@ -901,6 +901,155 @@ def visualize_noise_signal_comparison(comparison_results, title="Noise-Signal Co
         plt.savefig(save_path, dpi=ncfg.DPI, bbox_inches='tight')
     plt.show()
 
+def visualize_neuron_pairs_scatter(noise_correlations, signal_correlations, 
+                                 title="Neuron Pairs: Noise vs Signal Correlations", save_path=None):
+    """
+    绘制神经元对的噪音相关性与信号相关性散点图
+    
+    Parameters:
+    -----------
+    noise_correlations : dict
+        噪音相关性矩阵 {condition: correlation_matrix}
+    signal_correlations : dict
+        信号相关性矩阵 {condition: correlation_matrix}
+    title : str
+        图标题
+    save_path : str, optional
+        保存路径
+    """
+    print("生成神经元对噪音-信号相关性散点图...")
+    setup_noise_plot_style()
+    
+    # 准备数据
+    conditions = list(noise_correlations.keys())
+    n_conditions = len(conditions)
+    
+    if n_conditions == 0:
+        print("没有可用的相关性数据")
+        return
+    
+    # 创建子图布局
+    if n_conditions == 1:
+        fig, ax = plt.subplots(1, 1, figsize=ncfg.FIGSIZE)
+        axes = [ax]
+    elif n_conditions <= 3:
+        fig, axes = plt.subplots(1, n_conditions, figsize=(6*n_conditions, 6))
+        if n_conditions == 1:
+            axes = [axes]
+    else:
+        # 超过3个条件使用2行布局
+        cols = (n_conditions + 1) // 2
+        fig, axes = plt.subplots(2, cols, figsize=(6*cols, 12))
+        axes = axes.flatten() if n_conditions > 1 else [axes]
+    
+    # 为每个条件生成散点图
+    for idx, condition in enumerate(conditions):
+        ax = axes[idx]
+        
+        if condition not in signal_correlations:
+            ax.text(0.5, 0.5, f'Condition {condition}\nNo signal data', 
+                   ha='center', va='center', transform=ax.transAxes)
+            ax.set_title(f'Condition {condition}')
+            continue
+        
+        noise_matrix = noise_correlations[condition]
+        signal_matrix = signal_correlations[condition]
+        
+        if noise_matrix.shape != signal_matrix.shape:
+            ax.text(0.5, 0.5, f'Condition {condition}\nMatrix size mismatch', 
+                   ha='center', va='center', transform=ax.transAxes)
+            ax.set_title(f'Condition {condition}')
+            continue
+        
+        # 提取上三角矩阵的值（排除对角线）
+        n_neurons = noise_matrix.shape[0]
+        triu_indices = np.triu_indices(n_neurons, k=1)
+        
+        noise_values = noise_matrix[triu_indices]
+        signal_values = signal_matrix[triu_indices]
+        
+        # 移除NaN和无穷值
+        valid_mask = np.isfinite(noise_values) & np.isfinite(signal_values)
+        noise_values = noise_values[valid_mask]
+        signal_values = signal_values[valid_mask]
+        
+        if len(noise_values) == 0:
+            ax.text(0.5, 0.5, f'Condition {condition}\nNo valid data', 
+                   ha='center', va='center', transform=ax.transAxes)
+            ax.set_title(f'Condition {condition}')
+            continue
+        
+        print(f"  条件 {condition}: {len(noise_values)} 个神经元对")
+        
+        # 根据数据点数量选择可视化策略
+        if len(noise_values) > 5000:
+            # 数据点太多，使用hexbin
+            hb = ax.hexbin(noise_values, signal_values, gridsize=50, cmap='Blues', 
+                          alpha=0.8, mincnt=1)
+            plt.colorbar(hb, ax=ax, shrink=0.8, label='Count')
+        elif len(noise_values) > 1000:
+            # 中等数量，使用密度散点图
+            ax.scatter(noise_values, signal_values, s=8, alpha=0.4, 
+                      color=ncfg.COLORS['primary'], edgecolors='none')
+        else:
+            # 数据点较少，使用标准散点图
+            ax.scatter(noise_values, signal_values, s=20, alpha=0.6, 
+                      color=ncfg.COLORS['primary'], edgecolors='black', linewidth=0.3)
+        
+        # 计算相关系数
+        try:
+            corr_coef, p_val = pearsonr(noise_values, signal_values)
+            
+            # 添加回归线
+            if len(noise_values) > 3:
+                z = np.polyfit(noise_values, signal_values, 1)
+                p = np.poly1d(z)
+                x_range = np.linspace(noise_values.min(), noise_values.max(), 100)
+                ax.plot(x_range, p(x_range), color='red', linestyle='--', 
+                       linewidth=2, alpha=0.8)
+            
+            # 添加对角线
+            all_values = np.concatenate([noise_values, signal_values])
+            min_val, max_val = np.min(all_values), np.max(all_values)
+            ax.plot([min_val, max_val], [min_val, max_val], 
+                   color=ncfg.COLORS['neutral'], linestyle=':', 
+                   linewidth=1.5, alpha=0.6, label='Unity Line')
+            
+            # 显示统计信息
+            ax.text(0.05, 0.95, f'r = {corr_coef:.3f}\np = {p_val:.3e}\nn = {len(noise_values)}',
+                   transform=ax.transAxes, fontsize=10, fontweight='bold',
+                   bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.8),
+                   verticalalignment='top')
+                   
+        except Exception as e:
+            print(f"    统计计算失败: {e}")
+        
+        # 设置坐标轴
+        ax.set_xlabel('Noise Correlation', fontsize=12)
+        ax.set_ylabel('Signal Correlation', fontsize=12)
+        ax.set_title(f'Condition {condition}', fontsize=14, fontweight='bold')
+        ax.grid(True, alpha=0.3)
+        
+        # 设置坐标轴范围为对称
+        all_values = np.concatenate([noise_values, signal_values])
+        if len(all_values) > 0:
+            max_abs = np.max(np.abs(all_values))
+            ax.set_xlim(-max_abs*1.1, max_abs*1.1)
+            ax.set_ylim(-max_abs*1.1, max_abs*1.1)
+    
+    # 隐藏多余的子图
+    for idx in range(n_conditions, len(axes)):
+        axes[idx].set_visible(False)
+    
+    plt.suptitle(title, y=0.98, fontsize=16, fontweight='bold')
+    plt.tight_layout()
+    
+    if save_path:
+        plt.savefig(save_path, dpi=ncfg.DPI, bbox_inches='tight')
+        print(f"神经元对散点图已保存: {save_path}")
+    
+    plt.show()
+
 def visualize_shuffle_effects(shuffle_results, title="Neuron Shuffling Effects on Fisher Information", save_path=None):
     """专业可视化置换对Fisher信息的影响"""
     setup_noise_plot_style()
@@ -1302,16 +1451,28 @@ def run_noise_correlation_analysis():
     print("\n1. 数据加载与预处理")
     print("-" * 30)
     
-    # 加载原始数据
-    neural_data_raw, neuron_pos, start_edges, stimulus_data = load_data(cfg.DATA_PATH)
-    
-    # 数据分割
-    segments, labels = segment_neuron_data(neural_data_raw, start_edges, stimulus_data)
-    neural_data = np.array(segments)  # (n_trials, n_neurons, n_timepoints)
-    labels = np.array(labels)
-    
-    # 重分类标签（合并噪音条件）
-    labels = reclassify_labels(stimulus_data)
+    # 加载数据
+    if cfg.LOADER_VERSION == 'new':
+        neural_data_raw, neuron_pos, start_edges, stimulus_data = load_data(cfg.DATA_PATH)
+        segments, labels = segment_neuron_data(neural_data_raw, start_edges, stimulus_data)
+        neural_data = np.array(segments)  # (n_trials, n_neurons, n_timepoints)
+        labels = np.array(labels)
+        # 重分类标签（合并噪音条件）
+        labels = reclassify_labels(stimulus_data)
+    elif cfg.LOADER_VERSION == 'old':
+        from loaddata import load_old_version_data
+        neuron_index, neural_data, labels, neuron_pos = load_old_version_data(
+            cfg.OLD_VERSION_PATHS['neurons'],
+            cfg.OLD_VERSION_PATHS['trials'],
+            cfg.OLD_VERSION_PATHS['location']
+        )
+        # 对于旧版数据，neural_data和labels已经是处理好的格式
+        # neural_data 已经是 (trials, neurons, timepoints) 格式
+        neuron_pos = neuron_pos[0:2, :] if neuron_pos.shape[0] >= 2 else neuron_pos
+        print(f"旧版数据维度: neural_data={neural_data.shape}, labels={len(labels)}, neuron_pos={neuron_pos.shape}")
+        print("已切换到旧版数据加载模式")
+    else:
+        raise ValueError("无效的 LOADER_VERSION 配置")
     
     # 过滤掉标签为0的数据
     valid_mask = labels != 0
@@ -1463,6 +1624,14 @@ def run_noise_correlation_analysis():
         comparison_results,
         title="Noise-Signal Correlation Comparison",
         save_path=os.path.join(ncfg.RESULTS_DIR, 'noise_signal_comparison.png')
+    )
+    
+    # 可视化神经元对的噪音-信号相关性散点图
+    print("生成神经元对噪音-信号相关性散点图...")
+    visualize_neuron_pairs_scatter(
+        noise_correlations, signal_correlations,
+        title="Neuron Pairs: Noise vs Signal Correlations",
+        save_path=os.path.join(ncfg.RESULTS_DIR, 'neuron_pairs_scatter.png')
     )
     
     # 可视化置换效果

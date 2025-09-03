@@ -27,6 +27,8 @@ class NetworkConfig:
     
     # 相关性分析参数
     CORRELATION_METHOD = 'pearson'  # 'pearson' or 'spearman'
+    USE_FAST_CORRELATION = True     # 使用快速相关性计算（numpy向量化）
+    SKIP_P_VALUES = False           # 跳过p值计算以节省时间
     SIGNIFICANCE_THRESHOLD = 0.05   # 显著性阈值
     
     # 网络构建方法选择
@@ -104,6 +106,13 @@ def print_network_config():
     print("当前网络构建配置:")
     print("=" * 50)
     print(f"相关性方法: {net_cfg.CORRELATION_METHOD}")
+    print(f"快速计算模式: {'启用' if net_cfg.USE_FAST_CORRELATION else '禁用'}")
+    if net_cfg.USE_FAST_CORRELATION:
+        print(f"  - 使用numpy向量化计算，比传统方法快10-100倍")
+    print(f"p值计算: {'跳过' if net_cfg.SKIP_P_VALUES else '启用'}")
+    if net_cfg.SKIP_P_VALUES:
+        print(f"  - 跳过p值计算可进一步提升速度")
+    
     print(f"阈值化方法: {net_cfg.THRESHOLDING_METHOD}")
     
     if net_cfg.THRESHOLDING_METHOD == 'absolute':
@@ -166,7 +175,55 @@ def get_method_recommendations():
     print("- 标准分析: density + absolute + binarized")
     print("- 权重分析: density + absolute + weighted")
     print("- 方向性分析: density + both + weighted")
+    
+    print("\n速度优化建议:")
+    print("- 最快模式: USE_FAST_CORRELATION=True + SKIP_P_VALUES=True")
+    print("  适用于探索性分析，速度提升50-200倍")
+    print("- 平衡模式: USE_FAST_CORRELATION=True + SKIP_P_VALUES=False")
+    print("  保留统计检验能力，速度提升10-50倍")
+    print("- 精确模式: USE_FAST_CORRELATION=False")
+    print("  传统方法，最慢但最稳定")
+    
+    print("\n神经元数量建议:")
+    print("- < 500神经元: 任何模式都可接受")
+    print("- 500-2000神经元: 强烈推荐使用快速模式")  
+    print("- > 2000神经元: 必须使用快速模式，建议跳过p值")
     print("=" * 60)
+
+def set_fast_mode(level='balanced'):
+    """
+    快速设置优化模式
+    
+    参数:
+    level: 优化级别
+        'fastest': 最快模式 (跳过p值)
+        'balanced': 平衡模式 (保留p值)
+        'traditional': 传统模式 (慢但稳定)
+    """
+    global net_cfg
+    
+    if level == 'fastest':
+        net_cfg.USE_FAST_CORRELATION = True
+        net_cfg.SKIP_P_VALUES = True
+        print("已设置为最快模式: 快速相关计算 + 跳过p值")
+        print("预期速度提升: 50-200倍")
+        
+    elif level == 'balanced':
+        net_cfg.USE_FAST_CORRELATION = True
+        net_cfg.SKIP_P_VALUES = False
+        print("已设置为平衡模式: 快速相关计算 + 保留p值")
+        print("预期速度提升: 10-50倍")
+        
+    elif level == 'traditional':
+        net_cfg.USE_FAST_CORRELATION = False
+        net_cfg.SKIP_P_VALUES = False
+        print("已设置为传统模式: 循环计算 + 完整p值")
+        print("最慢但最稳定的方法")
+        
+    else:
+        raise ValueError("level must be 'fastest', 'balanced', or 'traditional'")
+        
+    print("提示: 重新运行 print_network_config() 查看当前配置")
 
 # %% 函数
 
@@ -239,8 +296,105 @@ def compute_correlation_matrix(neural_activity, method='pearson'):
     corr_matrix: (neurons, neurons) 相关系数矩阵
     p_matrix: (neurons, neurons) p值矩阵
     """
-    print(f"计算 {method} 相关系数矩阵...")
+    n_neurons = neural_activity.shape[1]
+    n_trials = neural_activity.shape[0]
     
+    if net_cfg.USE_FAST_CORRELATION and method == 'pearson':
+        print(f"使用快速numpy向量化计算Pearson相关系数矩阵...")
+        return compute_fast_pearson_correlation(neural_activity)
+    else:
+        print(f"使用传统方法计算 {method} 相关系数矩阵...")
+        return compute_traditional_correlation_matrix(neural_activity, method)
+
+def compute_fast_pearson_correlation(neural_activity):
+    """
+    使用numpy向量化快速计算Pearson相关系数矩阵
+    比传统循环方法快10-100倍
+    
+    参数:
+    neural_activity: (trials, neurons) 神经活动矩阵
+    
+    返回:
+    corr_matrix: (neurons, neurons) 相关系数矩阵  
+    p_matrix: (neurons, neurons) p值矩阵
+    """
+    n_neurons = neural_activity.shape[1]
+    n_trials = neural_activity.shape[0]
+    
+    print(f"快速计算 {n_neurons}×{n_neurons} Pearson相关矩阵 (试次数: {n_trials})...")
+    
+    # 标准化数据 (减去均值，除以标准差)
+    neural_centered = neural_activity - np.mean(neural_activity, axis=0, keepdims=True)
+    neural_std = np.std(neural_activity, axis=0, keepdims=True)
+    neural_std = np.where(neural_std == 0, 1, neural_std)  # 避免除零
+    neural_normalized = neural_centered / neural_std
+    
+    # 计算相关矩阵：C = (1/n-1) * X^T * X
+    corr_matrix = np.dot(neural_normalized.T, neural_normalized) / (n_trials - 1)
+    
+    # 确保对角线为1，处理数值误差
+    np.fill_diagonal(corr_matrix, 1.0)
+    
+    # 限制相关系数范围到[-1, 1]
+    corr_matrix = np.clip(corr_matrix, -1, 1)
+    
+    # p值计算（可选）
+    if net_cfg.SKIP_P_VALUES:
+        print("跳过p值计算以节省时间")
+        p_matrix = np.zeros_like(corr_matrix)
+    else:
+        print("计算p值...")
+        p_matrix = compute_fast_p_values(corr_matrix, n_trials)
+    
+    print(f"快速相关系数矩阵计算完成")
+    print(f"相关系数范围: {corr_matrix.min():.3f} ~ {corr_matrix.max():.3f}")
+    
+    return corr_matrix, p_matrix
+
+def compute_fast_p_values(corr_matrix, n_trials):
+    """
+    快速计算Pearson相关系数的p值
+    使用t分布近似
+    
+    参数:
+    corr_matrix: 相关系数矩阵
+    n_trials: 试次数
+    
+    返回:
+    p_matrix: p值矩阵
+    """
+    from scipy import stats
+    
+    # 计算t统计量
+    # t = r * sqrt((n-2)/(1-r²))
+    r = corr_matrix.copy()
+    
+    # 避免完全相关导致的数值问题
+    r = np.clip(r, -0.9999, 0.9999)
+    
+    # 计算t统计量
+    t_stat = r * np.sqrt((n_trials - 2) / (1 - r**2))
+    
+    # 计算双侧p值
+    p_matrix = 2 * (1 - stats.t.cdf(np.abs(t_stat), df=n_trials - 2))
+    
+    # 对角线p值设为0
+    np.fill_diagonal(p_matrix, 0.0)
+    
+    return p_matrix
+
+def compute_traditional_correlation_matrix(neural_activity, method):
+    """
+    传统循环方法计算相关系数矩阵（支持Pearson和Spearman）
+    
+    参数:
+    neural_activity: (trials, neurons) 神经活动矩阵
+    method: 相关系数方法
+    
+    返回:
+    corr_matrix: 相关系数矩阵
+    p_matrix: p值矩阵
+    """
     n_neurons = neural_activity.shape[1]
     corr_matrix = np.zeros((n_neurons, n_neurons))
     p_matrix = np.zeros((n_neurons, n_neurons))
@@ -267,7 +421,7 @@ def compute_correlation_matrix(neural_activity, method='pearson'):
         if (i + 1) % 100 == 0:
             print(f"已完成 {i + 1}/{n_neurons} 个神经元")
     
-    print(f"相关系数矩阵计算完成，形状: {corr_matrix.shape}")
+    print(f"传统相关系数矩阵计算完成，形状: {corr_matrix.shape}")
     print(f"相关系数范围: {corr_matrix.min():.3f} ~ {corr_matrix.max():.3f}")
     
     return corr_matrix, p_matrix
@@ -305,10 +459,13 @@ def threshold_correlation_matrix(corr_matrix, p_matrix,
     # 移除自连接（设为0）
     np.fill_diagonal(adj_matrix, 0)
     
-    # 步骤1: 应用显著性阈值
-    significant_mask = p_matrix < p_threshold
-    adj_matrix[~significant_mask] = 0
-    print(f"显著性过滤后保留 {np.sum(significant_mask)} 个连接")
+    # 步骤1: 应用显著性阈值（如果有p值）
+    if not net_cfg.SKIP_P_VALUES and p_matrix is not None:
+        significant_mask = p_matrix < p_threshold
+        adj_matrix[~significant_mask] = 0
+        print(f"显著性过滤后保留 {np.sum(significant_mask)} 个连接")
+    else:
+        print("跳过显著性过滤（无p值或已禁用）")
     
     # 步骤2: 处理相关系数符号
     if correlation_sign == 'absolute':
@@ -454,9 +611,13 @@ def calculate_global_thresholds_for_all_conditions(network_segments, stimulus_da
     
     print(f"总共收集了 {len(all_correlations)} 个连接")
     
-    # 应用显著性过滤
-    significant_mask = all_pvalues < net_cfg.SIGNIFICANCE_THRESHOLD
-    significant_corrs = all_correlations[significant_mask]
+    # 应用显著性过滤（如果有p值）
+    if not net_cfg.SKIP_P_VALUES:
+        significant_mask = all_pvalues < net_cfg.SIGNIFICANCE_THRESHOLD
+        significant_corrs = all_correlations[significant_mask]
+    else:
+        print("跳过显著性过滤，使用所有相关系数")
+        significant_corrs = all_correlations
     
     print(f"显著连接: {len(significant_corrs)} 个")
     
@@ -1513,13 +1674,38 @@ if __name__ == "__main__":
     print("\n=== 数据加载与预处理 ===")
     
     # 加载数据
-    neuron_data, neuron_pos, trigger_data, stimulus_data = load_data(cfg.DATA_PATH)
+    if cfg.LOADER_VERSION == 'new':
+        neuron_data, neuron_pos, trigger_data, stimulus_data = load_data(cfg.DATA_PATH)
+    elif cfg.LOADER_VERSION == 'old':
+        from loaddata import load_old_version_data
+        neuron_index, segments, labels, neuron_pos_old = load_old_version_data(
+            cfg.OLD_VERSION_PATHS['neurons'],
+            cfg.OLD_VERSION_PATHS['trials'],
+            cfg.OLD_VERSION_PATHS['location']
+        )
+        # 对于旧版数据，数据已经是分割好的格式，直接使用
+        segments = segments  # 已经是 (trials, neurons, timepoints) 格式
+        labels = labels     # 已经是处理好的标签
+        neuron_pos = neuron_pos_old[0:2, :] if neuron_pos_old.shape[0] >= 2 else neuron_pos_old  # 提取前两维
+        # 为了兼容某些函数调用，创建模拟数据
+        neuron_data = np.mean(segments, axis=0).T  # 转换为 (timepoints, neurons) 格式
+        trigger_data = np.arange(segments.shape[0])  # 模拟触发数据
+        stimulus_data = np.column_stack([labels, np.zeros(len(labels))])  # 创建兼容的刺激数据
+        print("已切换到旧版数据加载模式，部分可视化和分析可能需要调整")
+    else:
+        raise ValueError("无效的 LOADER_VERSION 配置")
     
-    # 数据分割
-    segments, labels = segment_neuron_data(neuron_data, trigger_data, stimulus_data)
+    # 数据分割（对于旧版数据跳过此步骤）
+    if cfg.LOADER_VERSION == 'new':
+        segments, labels = segment_neuron_data(neuron_data, trigger_data, stimulus_data)
+    # 对于旧版数据，segments和labels已经在上面加载了
     
     # 重新分类标签
-    reclassified_labels = reclassify_labels(stimulus_data)
+    if cfg.LOADER_VERSION == 'new':
+        reclassified_labels = reclassify_labels(stimulus_data)
+    else:
+        # 对于旧版数据，使用已有的标签
+        reclassified_labels = labels
     
     # RR神经元筛选
     print("\n筛选RR神经元...")

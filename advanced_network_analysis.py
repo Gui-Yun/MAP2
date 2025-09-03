@@ -1025,9 +1025,24 @@ def run_advanced_network_analysis():
     print("\n1. 数据加载与预处理")
     print("-" * 30)
     
-    neuron_data, neuron_pos, trigger_data, stimulus_data = load_data(cfg.DATA_PATH)
-    segments, labels = segment_neuron_data(neuron_data, trigger_data, stimulus_data)
-    new_labels = reclassify_labels(stimulus_data)
+    # 加载数据
+    if cfg.LOADER_VERSION == 'new':
+        neuron_data, neuron_pos, trigger_data, stimulus_data = load_data(cfg.DATA_PATH)
+        segments, labels = segment_neuron_data(neuron_data, trigger_data, stimulus_data)
+        new_labels = reclassify_labels(stimulus_data)
+    elif cfg.LOADER_VERSION == 'old':
+        from loaddata import load_old_version_data
+        neuron_index, segments, new_labels, neuron_pos = load_old_version_data(
+            cfg.OLD_VERSION_PATHS['neurons'],
+            cfg.OLD_VERSION_PATHS['trials'],
+            cfg.OLD_VERSION_PATHS['location']
+        )
+        # 对于旧版数据，segments和new_labels已经是处理好的格式
+        neuron_pos = neuron_pos[0:2, :] if neuron_pos.shape[0] >= 2 else neuron_pos
+        print(f"旧版数据维度: segments={segments.shape}, labels={len(new_labels)}, neuron_pos={neuron_pos.shape}")
+        print("已切换到旧版数据加载模式")
+    else:
+        raise ValueError("无效的 LOADER_VERSION 配置")
     
     # RR神经元筛选
     rr_results = fast_rr_selection(segments, new_labels)
@@ -1230,7 +1245,7 @@ def generate_advanced_analysis_report(rich_club_results, pid_results):
 if __name__ == "__main__":
     print("开始高级网络分析...")
     
-    # 运行分析
+    # %% 运行分析
     results = run_advanced_network_analysis()
     
     print("\n分析完成！主要发现:")

@@ -31,10 +31,10 @@ class Config:
     # 数据加载器版本: 'new' 或 'old'
     # 'new': 使用 process_trigger 和 load_data 加载新版数据
     # 'old': 使用 load_old_version_data 加载旧版 .mat 数据
-    LOADER_VERSION = 'new'
+    LOADER_VERSION = 'old'
 
     # 新版数据路径
-    DATA_PATH = r'F:\brain\Micedata\M65_0816'
+    DATA_PATH = r'F:\brain\Micedata\M74_0816'
     
     # 旧版数据路径 (仅在 LOADER_VERSION = 'old' 时使用)
     OLD_VERSION_PATHS = {
@@ -66,10 +66,10 @@ class Config:
     
     # 快速RR筛选参数
     EFFECT_SIZE_THRESHOLD = 0.5   # 效应大小阈值
+    # SNR_THRESHOLD = 1.0          # 信噪比阈值
+    # RESPONSE_RATIO_THRESHOLD = 0.4  # 响应比例阈值
     SNR_THRESHOLD = 0.9          # 信噪比阈值
-    RESPONSE_RATIO_THRESHOLD = 0.4  # 响应比例阈值
-    # SNR_THRESHOLD = 0.9          # 信噪比阈值
-    # RESPONSE_RATIO_THRESHOLD = 0.6  # 响应比例阈值
+    RESPONSE_RATIO_THRESHOLD = 0.6  # 响应比例阈值
     # 分类参数
     TEST_SIZE = 0.3           # 测试集比例
     RANDOM_STATE = 42         # 随机种子
@@ -91,14 +91,31 @@ class Config:
     NEURON_THRESHOLD = 1000   # 使用原始RR方法的神经元数量阈值
     
     # 试验范围（用于去掉首尾）
-    TRIAL_START_SKIP = 0     # 跳过开头的试验数
+    TRIAL_START_SKIP = 1     # 跳过开头的试验数
     TRIAL_END_SKIP = 0      # 跳过结尾的试验数
-    TOTAL_TRIALS = 176      # 保持的试验总数
+    TOTAL_TRIALS = 180      # 保持的试验总数
     
     # 预处理参数
     ENABLE_PREPROCESSING = True      # 是否启用预处理
     ENABLE_CLASS_BALANCE = True      # 是否启用类别平衡
     PREPROCESSING_METHOD = 'comprehensive'  # 预处理方法: 'simple', 'comprehensive'
+    
+    @classmethod
+    def get_results_dir(cls):
+        """根据数据版本获取结果保存目录"""
+        if cls.LOADER_VERSION == 'old':
+            # 旧版数据：使用旧版数据路径的父目录
+            import os
+            old_data_dir = os.path.dirname(cls.OLD_VERSION_PATHS['neurons'])
+            return os.path.join(old_data_dir, 'results')
+        else:
+            # 新版数据：使用当前目录的results
+            return 'results'
+    
+    @classmethod
+    def get_figures_dir(cls):
+        """根据数据版本获取图片保存目录"""
+        return os.path.join(cls.get_results_dir(), 'figures')
     
     # 特征选择参数
     MAX_FEATURES = 500               # 特征选择最大特征数
@@ -2636,27 +2653,32 @@ if __name__ == '__main__':
     
     # %% 可视化原始数据
     print("\n=== 原始数据可视化 ===")
-    os.makedirs('results/figures', exist_ok=True)
+    
+    # 根据数据版本确定保存路径
+    figures_dir = cfg.get_figures_dir()
+    os.makedirs(figures_dir, exist_ok=True)
+    print(f"图片将保存到: {figures_dir}")
     
     # 设置科研绘图风格
     setup_plot_style()
     
     # 神经活动热图
     visualize_neural_activity_heatmap(neuron_data, "Neural Activity Heatmap", 
-                                     save_path='results/figures/neural_activity_heatmap.png')
+                                     save_path=os.path.join(figures_dir, 'neural_activity_heatmap.png'))
     
     # 触发信号分布  
     visualize_trigger_distribution(trigger_data, "Stimulus Trigger Distribution",
-                                  save_path='results/figures/trigger_distribution.png')
+                                  save_path=os.path.join(figures_dir, 'trigger_distribution.png'))
     
     # 刺激数据分布
     visualize_stimulus_data_distribution(stimulus_data, "Stimulus Data Distribution",
-                                        save_path='results/figures/stimulus_distribution.png')
+                                        save_path=os.path.join(figures_dir, 'stimulus_distribution.png'))
     
     # RR神经元空间分布（稍后在RR分析后调用）
     
     # %% 保存神经信号统计信息
-    save_neuron_activity_stats(neuron_data, trigger_data, save_dir='results')
+    results_dir = cfg.get_results_dir()
+    save_neuron_activity_stats(neuron_data, trigger_data, save_dir=results_dir)
     
     # %% 将神经信号划分为trail，并标记label
     # 在分割前先检查原始神经数据的维度
@@ -2688,7 +2710,7 @@ if __name__ == '__main__':
             else:
                 example_trials_idx = [0] # 如果没有有效试次，就用第一个试次
             
-            save_single_neuron_stats(example_neuron_idx, example_trials_idx, segments, save_dir='results')
+            save_single_neuron_stats(example_neuron_idx, example_trials_idx, segments, save_dir=results_dir)
         else:
             print("没有神经元数据，跳过保存示例神经元统计")
     else:
@@ -2758,7 +2780,10 @@ if __name__ == '__main__':
         print(f"RR神经元索引: {sorted(rr_results['rr_neurons'][:20])}{'...' if len(rr_results['rr_neurons']) > 20 else ''}")
     
     # 保存RR神经元筛选结果
-    rr_save_path = os.path.join(cfg.DATA_PATH, 'RR_Neurons_Results.mat')
+    if cfg.LOADER_VERSION == 'old':
+        rr_save_path = os.path.join(os.path.dirname(cfg.OLD_VERSION_PATHS['neurons']), 'RR_Neurons_Results.mat')
+    else:
+        rr_save_path = os.path.join(cfg.DATA_PATH, 'RR_Neurons_Results.mat')
     scipy.io.savemat(rr_save_path, {
         'rr_neurons': np.array(rr_results['rr_neurons']),
         'response_neurons': np.array(rr_results['response_neurons']),
@@ -2774,11 +2799,11 @@ if __name__ == '__main__':
     
     # 保存神经元空间分布统计
     if neuron_pos.shape[1] > 0:
-        save_rr_neurons_distribution(neuron_pos, rr_results, save_dir='results')
+        save_rr_neurons_distribution(neuron_pos, rr_results, save_dir=results_dir)
         
         # 可视化RR神经元空间分布
         visualize_rr_neurons_spatial_distribution(neuron_pos, rr_results,
-                                                save_path='results/figures/rr_neurons_spatial.png')
+                                                save_path=os.path.join(figures_dir, 'rr_neurons_spatial.png'))
     
     print("\nRR神经元筛选完成！")
 
@@ -2835,21 +2860,21 @@ if __name__ == '__main__':
                 best_cm = improved_results['results'][best_model]['confusion_matrix']
                 
                 # 保存分类结果
-                os.makedirs('results', exist_ok=True)
+                os.makedirs(results_dir, exist_ok=True)
                 np.savez_compressed(
-                    'results/classification_results.npz',
+                    os.path.join(results_dir, 'classification_results.npz'),
                     best_model=best_model,
                     confusion_matrix=best_cm,
                     original_accuracy=original_results['best_cv_mean'],
                     improved_accuracy=improved_results['best_cv_mean'],
                     improvement=improved_results['best_cv_mean'] - original_results['best_cv_mean']
                 )
-                print("分类结果已保存到 results/classification_results.npz")
+                print(f"分类结果已保存到 {os.path.join(results_dir, 'classification_results.npz')}")
                 
                 # 可视化分类效果
                 print("\n=== 分类效果可视化 ===")
                 visualize_classification_performance(improved_results, 
-                                                   save_path='results/figures/classification_performance.png')
+                                                   save_path=os.path.join(figures_dir, 'classification_performance.png'))
                 
                 # 可视化ROC曲线
                 print("生成ROC曲线...")
@@ -2862,7 +2887,7 @@ if __name__ == '__main__':
                     'LogisticRegression': LogisticRegression(class_weight='balanced', random_state=cfg.RANDOM_STATE, max_iter=1000)
                 }
                 visualize_roc_curves(balanced_X, balanced_y, classifiers_for_roc,
-                                   save_path='results/figures/roc_curves.png')
+                                   save_path=os.path.join(figures_dir, 'roc_curves.png'))
             else:
                 print(f"预处理方法准确率: {improved_results['best_cv_mean']:.3f} ± {improved_results['best_cv_std']:.3f}")
                 improvement = improved_results['best_cv_mean'] - original_results['best_cv_mean']
@@ -2880,33 +2905,33 @@ if __name__ == '__main__':
             segments, new_labels, rr_results['rr_neurons'])
         
         # 保存结果
-        save_accuracy_over_time(time_accuracies, time_points, save_dir='results')
+        save_accuracy_over_time(time_accuracies, time_points, save_dir=results_dir)
         
         # 可视化时间点分类准确率
         print("\n=== 时间点分析可视化 ===")
         visualize_accuracy_over_time(time_accuracies, time_points,
-                                   save_path='results/figures/accuracy_over_time.png')
+                                   save_path=os.path.join(figures_dir, 'accuracy_over_time.png'))
         
         # 计算Fisher信息
         print("\n=== Fisher信息分析 ===")
         fisher_scores = calculate_fisher_information(segments, new_labels, rr_results['rr_neurons'])
-        save_fisher_information(fisher_scores, np.arange(len(fisher_scores)), save_dir='results')
+        save_fisher_information(fisher_scores, np.arange(len(fisher_scores)), save_dir=results_dir)
         
         # 可视化Fisher信息
         print("\n=== Fisher信息可视化 ===")
         visualize_fisher_information(fisher_scores, np.arange(len(fisher_scores)),
-                                   save_path='results/figures/fisher_information.png')
+                                   save_path=os.path.join(figures_dir, 'fisher_information.png'))
         
         # 可视化Fisher信息热图
         print("生成Fisher信息热图...")
         visualize_fisher_heatmap(segments, new_labels, rr_results['rr_neurons'],
                                time_window=(cfg.PRE_FRAMES, cfg.PRE_FRAMES + cfg.STIMULUS_DURATION),
-                               save_path='results/figures/fisher_heatmap.png')
+                               save_path=os.path.join(figures_dir, 'fisher_heatmap.png'))
         
         # 可视化组合分析
         print("\n=== 组合分析可视化 ===")  
         visualize_combined_analysis(time_accuracies, fisher_scores, np.arange(len(fisher_scores)),
-                                  save_path='results/figures/combined_analysis.png')
+                                  save_path=os.path.join(figures_dir, 'combined_analysis.png'))
         
         # 神经元数量分析
         print("\n=== 神经元数量对性能影响分析 ===")
@@ -2924,7 +2949,7 @@ if __name__ == '__main__':
                     neuron_results['accuracy_stds'],
                     neuron_results['fisher_scores'],
                     neuron_results['fisher_stds'],
-                    save_path='results/figures/neuron_count_effect.png'
+                    save_path=os.path.join(figures_dir, 'neuron_count_effect.png')
                 )
         else:
             print("RR神经元数量不足，跳过神经元数量分析")
@@ -2933,7 +2958,7 @@ if __name__ == '__main__':
     print("\n" + "="*60)
     print("可视化总结")
     print("="*60)
-    print("所有可视化图像已保存到 results/figures/ 目录:")
+    print(f"所有可视化图像已保存到 {figures_dir}/ 目录:")
     print("- neural_activity_heatmap.png: 神经活动热图")
     print("- trigger_distribution.png: 刺激触发分布")
     print("- stimulus_distribution.png: 刺激数据分布")

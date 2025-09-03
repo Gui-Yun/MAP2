@@ -17,7 +17,9 @@ from loaddata import cfg
 
 def create_analysis_log():
     """创建分析日志记录"""
-    log_dir = os.path.join(cfg.DATA_PATH if hasattr(cfg, 'DATA_PATH') else 'results', 'analysis_logs')
+    # 使用版本感知的路径管理
+    base_dir = cfg.get_results_dir() if hasattr(cfg, 'get_results_dir') else 'results'
+    log_dir = os.path.join(base_dir, 'analysis_logs')
     os.makedirs(log_dir, exist_ok=True)
     
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -99,14 +101,16 @@ def collect_visualization_results():
     visualizations = {}
     seen_files = set()  # 用于去重
     
-    # 定义要收集的目录和文件模式
+    # 定义要收集的目录和文件模式，使用版本感知的路径
+    results_dir = cfg.get_results_dir() if hasattr(cfg, 'get_results_dir') else 'results'
+    figures_dir = cfg.get_figures_dir() if hasattr(cfg, 'get_figures_dir') else 'results/figures'
+    
     search_paths = [
-        ('results/figures', '基础分析可视化'),
-        ('results/advanced_analysis', '高级网络分析可视化'),
-        ('results/noise_correlation', '噪声相关分析可视化'),
-        (os.path.join(getattr(cfg, 'DATA_PATH', ''), 'centrality_results') if hasattr(cfg, 'DATA_PATH') else None, '中心性分析可视化'),
-        (os.path.join(getattr(cfg, 'DATA_PATH', ''), 'manifold_results') if hasattr(cfg, 'DATA_PATH') else None, 't-SNE流形学习可视化'),
-        ('results/manifold_results', 't-SNE流形学习可视化')  # 添加本地manifold结果目录
+        (figures_dir, '基础分析可视化'),
+        (os.path.join(results_dir, 'advanced_analysis'), '高级网络分析可视化'),
+        (os.path.join(results_dir, 'noise_correlation'), '噪声相关分析可视化'),
+        (os.path.join(results_dir, 'centrality_results'), '中心性分析可视化'),
+        (os.path.join(results_dir, 'manifold_results'), 't-SNE流形学习可视化')
     ]
     
     for path, category in search_paths:
@@ -255,9 +259,9 @@ def generate_markdown_report(log_file, results_summary, total_elapsed):
     # 添加数据文件信息
     markdown_content += "\n## 📁 生成的数据文件\n"
     
-    base_dirs = ['results']
-    if hasattr(cfg, 'DATA_PATH'):
-        base_dirs.append(cfg.DATA_PATH)
+    # 使用版本感知的路径
+    results_dir = cfg.get_results_dir() if hasattr(cfg, 'get_results_dir') else 'results'
+    base_dirs = [results_dir]
     
     for base_dir in base_dirs:
         if os.path.exists(base_dir):
@@ -458,11 +462,10 @@ def generate_analysis_summary(log_file, results_summary):
     
     # 生成结果目录信息
     log_message("\n生成的结果目录:", log_file)
-    base_dirs = []
     
-    if hasattr(cfg, 'DATA_PATH'):
-        base_dirs.append(cfg.DATA_PATH)
-    base_dirs.append('results')
+    # 使用版本感知的路径
+    results_dir = cfg.get_results_dir() if hasattr(cfg, 'get_results_dir') else 'results'
+    base_dirs = [results_dir]
     
     for base_dir in base_dirs:
         if os.path.exists(base_dir):
@@ -484,13 +487,16 @@ def main():
     print("神经数据完整分析流程")
     print("="*80)
     print(f"数据加载版本: {cfg.LOADER_VERSION}")
-    print(f"数据路径: {getattr(cfg, 'DATA_PATH', 'results')}")
+    results_dir = cfg.get_results_dir() if hasattr(cfg, 'get_results_dir') else 'results'
+    print(f"结果保存路径: {results_dir}")
     print("="*80)
     
     # 创建日志文件
     log_file = create_analysis_log()
     log_message("开始完整分析流程", log_file)
+    results_dir = cfg.get_results_dir() if hasattr(cfg, 'get_results_dir') else 'results'
     log_message(f"数据加载版本: {cfg.LOADER_VERSION}", log_file)
+    log_message(f"结果保存路径: {results_dir}", log_file)
     
     # 分析模块配置
     analysis_modules = [
@@ -557,13 +563,14 @@ def main():
     if successful_count == total_count:
         print("\n🎉 所有分析模块运行成功!")
         print("\n📁 主要结果位置:")
-        print("├── results/figures/ - 所有可视化图像")
-        print("├── results/ - 数值分析结果(.npz文件)")
-        print("├── [数据路径]/analysis_logs/ - 运行日志和整合报告")
-        if hasattr(cfg, 'DATA_PATH'):
-            print(f"├── {cfg.DATA_PATH}/centrality_results/ - 中心性分析结果")
-            print(f"├── {cfg.DATA_PATH}/advanced_analysis/ - 高级网络分析")
-            print(f"└── {cfg.DATA_PATH}/noise_correlation/ - 噪声相关分析")
+        results_dir = cfg.get_results_dir() if hasattr(cfg, 'get_results_dir') else 'results'
+        figures_dir = cfg.get_figures_dir() if hasattr(cfg, 'get_figures_dir') else 'results/figures'
+        print(f"├── {figures_dir}/ - 所有可视化图像")
+        print(f"├── {results_dir}/ - 数值分析结果(.npz文件)")
+        print(f"├── {results_dir}/analysis_logs/ - 运行日志和整合报告")
+        print(f"├── {results_dir}/centrality_results/ - 中心性分析结果")
+        print(f"├── {results_dir}/advanced_analysis/ - 高级网络分析")
+        print(f"└── {results_dir}/noise_correlation/ - 噪声相关分析")
         
         print(f"\n📊 查看整合报告获取完整的可视化结果展示!")
     else:

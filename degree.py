@@ -4,6 +4,8 @@
 # 分析网络拓扑中心性指标与Fisher信息、分类准确率的关系
 # %% 导入必要的库
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')  # 设置为非交互式后端，防止弹出窗口
 import matplotlib.pyplot as plt
 import seaborn as sns
 import networkx as nx
@@ -686,14 +688,15 @@ def analyze_centrality_information_relationship(neuron_data, segments, labels, r
         # 保存分析数据
         save_centrality_vs_information_data(centrality_name, level_groups, level_ranges,
                                            fisher_scores, accuracy_scores, centrality_scores, 
-                                           save_dir=os.path.join(cfg.DATA_PATH, 'results'))
+                                           save_dir=cfg.get_results_dir())
         
         # 多变量Fisher信息分析
         print(f"\n--- {centrality_name} 多变量Fisher信息分析 ---")
-        os.makedirs(os.path.join(cfg.DATA_PATH, 'centrality_results'), exist_ok=True)
+        centrality_results_dir = os.path.join(cfg.get_results_dir(), 'centrality_results')
+        os.makedirs(centrality_results_dir, exist_ok=True)
         multivariate_results = visualize_centrality_vs_multivariate_fisher(
             segments_subset, labels, centrality_name, level_groups, centrality_scores,
-            save_path=os.path.join(cfg.DATA_PATH, 'centrality_results', f'{centrality_name}_multivariate_fisher_regression.png')
+            save_path=os.path.join(centrality_results_dir, f'{centrality_name}_multivariate_fisher_regression.png')
         )
         
         # 保存结果
@@ -1290,22 +1293,34 @@ def visualize_centrality_vs_information(centrality_name, level_groups, level_ran
             })
             
             # Violin plot for centrality distribution by level
-            parts = ax_dist.violinplot([df[df['level'] == f'L{i+1}']['centrality'].values 
-                                      for i in range(len(level_groups)) 
-                                      if len(df[df['level'] == f'L{i+1}']) > 0],
-                                     positions=range(len(level_groups)), 
-                                     widths=0.6, showmeans=True, showmedians=True)
+            # 获取非空的level组
+            valid_data = []
+            valid_positions = []
+            valid_labels = []
+            
+            for i in range(len(level_groups)):
+                level_data = df[df['level'] == f'L{i+1}']['centrality'].values
+                if len(level_data) > 0:
+                    valid_data.append(level_data)
+                    valid_positions.append(i)
+                    valid_labels.append(f'L{i+1}')
+            
+            if valid_data:  # 只有在有有效数据时才绘制
+                parts = ax_dist.violinplot(valid_data, positions=valid_positions, 
+                                         widths=0.6, showmeans=True, showmedians=True)
             
             # Color the violins
-            for pc, color in zip(parts['bodies'], plt.cm.viridis(np.linspace(0, 1, len(parts['bodies'])))):
-                pc.set_facecolor(color)
+            if valid_data and 'bodies' in parts:
+                for pc, color in zip(parts['bodies'], plt.cm.viridis(np.linspace(0, 1, len(parts['bodies'])))):
+                    pc.set_facecolor(color)
                 pc.set_alpha(0.7)
             
             ax_dist.set_xlabel('Centrality Level', fontsize=12)
             ax_dist.set_ylabel(f'{centrality_name.replace("_", " ").title()} Distribution', fontsize=12)
             ax_dist.set_title('Centrality Distribution by Level', fontsize=14, fontweight='bold')
-            ax_dist.set_xticks(range(len(level_groups)))
-            ax_dist.set_xticklabels([f'L{i+1}' for i in range(len(level_groups))])
+            if valid_data:
+                ax_dist.set_xticks(valid_positions)
+                ax_dist.set_xticklabels(valid_labels)
             ax_dist.grid(True, alpha=0.3)
     
     plt.suptitle(f'{centrality_name.replace("_", " ").title()} Centrality - Fisher Information Relationship Analysis', 
@@ -1861,7 +1876,7 @@ if __name__ == "__main__":
     
     # 可视化分析结果
     print("\n4. 可视化分析结果...")
-    results_dir = os.path.join(cfg.DATA_PATH, 'centrality_results')
+    results_dir = os.path.join(cfg.get_results_dir(), 'centrality_results')
     visualize_centrality_summary(results, G, save_dir=results_dir)
     
     print("\n=== 分析完成 ===")

@@ -5,6 +5,8 @@
 
 # %% 导入必要的库
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')  # 设置为非交互式后端，防止弹出窗口
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.decomposition import PCA
@@ -948,8 +950,8 @@ if __name__ == "__main__":
     # %% 科研风格可视化
     print("\n4. 生成科研风格可视化...")
     
-    # 创建图片保存目录
-    figures_dir = os.path.join(cfg.DATA_PATH if hasattr(cfg, 'DATA_PATH') else 'results', 'manifold_results')
+    # 创建图片保存目录 - 使用统一路径配置
+    figures_dir = os.path.join(cfg.get_results_dir(), 'manifold_results')
     os.makedirs(figures_dir, exist_ok=True)
     
     # 生成综合分析图
@@ -974,8 +976,8 @@ if __name__ == "__main__":
     # %% 保存分析结果和数据
     print("\n6. 保存分析结果...")
     
-    # 创建结果保存目录
-    results_dir = os.path.join(cfg.DATA_PATH if hasattr(cfg, 'DATA_PATH') else 'results', 'manifold_results')
+    # 创建结果保存目录 - 使用统一路径配置
+    results_dir = os.path.join(cfg.get_results_dir(), 'manifold_results')
     os.makedirs(results_dir, exist_ok=True)
     
     # 保存t-SNE结果数据

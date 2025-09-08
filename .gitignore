@@ -1,5 +1,5 @@
-.claude/
-cebra_results/* 
-results/*
+.claude
+cebra_results/
+results/
 __pycache__/
 *.pyc   

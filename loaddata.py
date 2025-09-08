@@ -6,6 +6,8 @@ import os
 import numpy as np
 import scipy.io
 import pandas as pd
+import matplotlib
+matplotlib.use('Agg')  # 设置为非交互式后端，防止弹出窗口
 import matplotlib.pyplot as plt
 from sklearn.svm import SVC
 from sklearn.model_selection import train_test_split, cross_val_score, StratifiedKFold
@@ -34,13 +36,13 @@ class Config:
     LOADER_VERSION = 'old'
 
     # 新版数据路径
-    DATA_PATH = r'F:\brain\Micedata\M74_0816'
+    DATA_PATH = r'C:\Users\76629\OneDrive\brain\Micedata\M65_0816'
     
     # 旧版数据路径 (仅在 LOADER_VERSION = 'old' 时使用)
     OLD_VERSION_PATHS = {
-        'neurons': r'F:\brain\Micedata\M27_1008\Neurons.mat',
-        'trials': r'F:\brain\Micedata\M27_1008\Trial_data.mat',
-        'location': r'F:\brain\Micedata\M27_1008\wholebrain_output.mat'
+        'neurons': r'C:\Users\76629\OneDrive\brain\Micedata\M27_1008\Neurons.mat',
+        'trials': r'C:\Users\76629\OneDrive\brain\Micedata\M27_1008\Trial_data.mat',
+        'location': r'C:\Users\76629\OneDrive\brain\Micedata\M27_1008\wholebrain_output.mat'
     }
 
     # 触发文件处理参数
@@ -91,9 +93,9 @@ class Config:
     NEURON_THRESHOLD = 1000   # 使用原始RR方法的神经元数量阈值
     
     # 试验范围（用于去掉首尾）
-    TRIAL_START_SKIP = 1     # 跳过开头的试验数
+    TRIAL_START_SKIP = 0     # 跳过开头的试验数
     TRIAL_END_SKIP = 0      # 跳过结尾的试验数
-    TOTAL_TRIALS = 180      # 保持的试验总数
+    TOTAL_TRIALS = 176      # 保持的试验总数
     
     # 预处理参数
     ENABLE_PREPROCESSING = True      # 是否启用预处理
@@ -102,15 +104,15 @@ class Config:
     
     @classmethod
     def get_results_dir(cls):
-        """根据数据版本获取结果保存目录"""
+        """根据数据版本获取结果保存目录 - 统一存储到数据文件夹下"""
+        import os
         if cls.LOADER_VERSION == 'old':
-            # 旧版数据：使用旧版数据路径的父目录
-            import os
+            # 旧版数据：使用旧版数据路径的父目录下的results
             old_data_dir = os.path.dirname(cls.OLD_VERSION_PATHS['neurons'])
             return os.path.join(old_data_dir, 'results')
         else:
-            # 新版数据：使用当前目录的results
-            return 'results'
+            # 新版数据：统一使用数据路径下的results目录
+            return os.path.join(cls.DATA_PATH, 'results')
     
     @classmethod
     def get_figures_dir(cls):
@@ -1860,6 +1862,67 @@ def calculate_fisher_information(segments, labels, rr_neurons):
     
     return np.array(fisher_scores)
 
+def calculate_fisher_information_by_condition(segments, labels, rr_neurons):
+    """
+    按条件分别计算Fisher信息
+    
+    参数:
+    segments: 神经数据片段 (trials, neurons, timepoints)
+    labels: 标签数组
+    rr_neurons: RR神经元索引
+    
+    返回:
+    condition_fisher_scores: 字典，包含每个条件的Fisher信息分数
+    """
+    print("开始按条件分别计算Fisher信息...")
+    
+    # 过滤有效数据和RR神经元
+    valid_mask = labels != 0
+    valid_segments = segments[valid_mask][:, rr_neurons, :]
+    valid_labels = labels[valid_mask]
+    
+    n_trials, n_neurons, n_timepoints = valid_segments.shape
+    unique_labels = np.unique(valid_labels)
+    
+    print(f"数据规模: {n_trials}个试次, {n_neurons}个神经元, {n_timepoints}个时间点")
+    print(f"条件标签: {unique_labels}")
+    
+    condition_fisher_scores = {}
+    
+    # 为每对条件计算Fisher信息
+    condition_pairs = [
+        ([1, 2], 'condition_1_vs_2'),
+        ([1, 3], 'condition_1_vs_3'), 
+        ([2, 3], 'condition_2_vs_3'),
+        ([1, 2, 3], 'all_conditions')  # 保留原始的全条件比较
+    ]
+    
+    for conditions, pair_name in condition_pairs:
+        # 检查是否有足够的数据
+        condition_mask = np.isin(valid_labels, conditions)
+        if np.sum(condition_mask) < 10:  # 至少需要10个试次
+            print(f"跳过 {pair_name}: 数据不足 ({np.sum(condition_mask)} 个试次)")
+            condition_fisher_scores[pair_name] = np.zeros(n_timepoints)
+            continue
+            
+        condition_segments = valid_segments[condition_mask]
+        condition_labels = valid_labels[condition_mask]
+        
+        print(f"计算 {pair_name}: {len(condition_segments)} 个试次")
+        
+        fisher_scores = []
+        for t in range(n_timepoints):
+            timepoint_data = condition_segments[:, :, t]
+            fisher_score = calculate_multivariate_fisher_single_timepoint(timepoint_data, condition_labels)
+            fisher_scores.append(fisher_score)
+            
+            if t % 20 == 0:  # 每20个时间点打印一次进度
+                print(f"  {pair_name} 时间点 {t}: Fisher信息 {fisher_score:.3f}")
+        
+        condition_fisher_scores[pair_name] = np.array(fisher_scores)
+    
+    return condition_fisher_scores
+
 def calculate_multivariate_fisher_single_timepoint(data, labels):
     """
     计算单个时间点的多变量Fisher信息
@@ -1994,6 +2057,76 @@ def save_fisher_information(fisher_scores, time_points, pre_frames=cfg.PRE_FRAME
     print(f"最高Fisher信息: {max_fisher:.3f} (时间点 {max_time})")
     print(f"整体平均Fisher信息: {np.mean(fisher_scores):.3f} ± {np.std(fisher_scores):.3f}")
     print(f"Fisher信息结果已保存到 {save_dir}/fisher_over_time.npz")
+
+def save_fisher_information_by_condition(condition_fisher_scores, time_points, 
+                                       pre_frames=cfg.PRE_FRAMES, 
+                                       stimulus_duration=cfg.STIMULUS_DURATION, 
+                                       save_dir='results'):
+    """
+    保存分条件Fisher信息数据和统计信息
+    
+    参数:
+    condition_fisher_scores: 分条件Fisher信息字典
+    time_points: 时间点数组
+    pre_frames: 刺激前帧数
+    stimulus_duration: 刺激持续时间
+    """
+    os.makedirs(save_dir, exist_ok=True)
+    
+    stimulus_start = pre_frames
+    stimulus_end = pre_frames + stimulus_duration
+    
+    # 为每个条件计算统计信息
+    condition_stats = {}
+    
+    print(f"\n=== 分条件Fisher信息分析结果 ===")
+    
+    for condition_name, fisher_scores in condition_fisher_scores.items():
+        # 计算统计信息
+        max_fisher_idx = np.argmax(fisher_scores)
+        max_time = time_points[max_fisher_idx] if len(time_points) > max_fisher_idx else max_fisher_idx
+        max_fisher = fisher_scores[max_fisher_idx]
+        
+        baseline_fisher = np.mean(fisher_scores[:pre_frames]) if pre_frames > 0 else 0
+        stimulus_fisher = np.mean(fisher_scores[stimulus_start:stimulus_end])
+        response_fisher = np.mean(fisher_scores[stimulus_end:]) if stimulus_end < len(fisher_scores) else 0
+        
+        condition_stats[condition_name] = {
+            'fisher_scores': fisher_scores,
+            'baseline_fisher': baseline_fisher,
+            'stimulus_fisher': stimulus_fisher,
+            'response_fisher': response_fisher,
+            'max_fisher': max_fisher,
+            'max_time': max_time,
+            'overall_mean': np.mean(fisher_scores),
+            'overall_std': np.std(fisher_scores)
+        }
+        
+        print(f"\n--- {condition_name} ---")
+        print(f"基线期平均: {baseline_fisher:.3f}")
+        print(f"刺激期平均: {stimulus_fisher:.3f}")
+        print(f"响应期平均: {response_fisher:.3f}")
+        print(f"最高值: {max_fisher:.3f} (时间点 {max_time})")
+        print(f"整体均值: {np.mean(fisher_scores):.3f} ± {np.std(fisher_scores):.3f}")
+    
+    # 保存所有条件的数据
+    save_data = {
+        'time_points': time_points,
+        'stimulus_start': stimulus_start,
+        'stimulus_end': stimulus_end,
+        'condition_stats': condition_stats
+    }
+    
+    # 添加各条件的原始数据
+    for condition_name, fisher_scores in condition_fisher_scores.items():
+        save_data[f'fisher_scores_{condition_name}'] = fisher_scores
+    
+    np.savez_compressed(
+        os.path.join(save_dir, 'fisher_by_condition.npz'),
+        **save_data
+    )
+    
+    print(f"\n分条件Fisher信息结果已保存到 {save_dir}/fisher_by_condition.npz")
 
 def visualize_fisher_information(fisher_scores, time_points=None, 
                                pre_frames=cfg.PRE_FRAMES, stimulus_duration=cfg.STIMULUS_DURATION,
@@ -2217,6 +2350,152 @@ def visualize_fisher_comparison(fisher_data_dict, save_path=None):
     if save_path:
         plt.savefig(save_path, dpi=cfg.VISUALIZATION_DPI, bbox_inches='tight')
         print(f"Fisher information comparison saved to: {save_path}")
+    plt.show()
+
+def visualize_fisher_information_by_condition(condition_fisher_scores, time_points=None,
+                                            pre_frames=cfg.PRE_FRAMES, 
+                                            stimulus_duration=cfg.STIMULUS_DURATION,
+                                            save_path=None):
+    """
+    可视化分条件Fisher信息
+    
+    参数:
+    condition_fisher_scores: 分条件Fisher信息字典
+    time_points: 时间点数组
+    pre_frames: 基线期帧数
+    stimulus_duration: 刺激持续时间
+    save_path: 保存路径
+    """
+    setup_plot_style()
+    
+    if time_points is None:
+        # 使用第一个条件的长度作为时间点参考
+        first_condition = list(condition_fisher_scores.keys())[0]
+        time_points = np.arange(len(condition_fisher_scores[first_condition]))
+    
+    stimulus_start = pre_frames
+    stimulus_end = pre_frames + stimulus_duration
+    
+    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+    
+    # 颜色方案
+    condition_colors = {
+        'condition_1_vs_2': cfg.PLOT_COLORS['primary'],
+        'condition_1_vs_3': cfg.PLOT_COLORS['secondary'], 
+        'condition_2_vs_3': cfg.PLOT_COLORS['accent'],
+        'all_conditions': cfg.PLOT_COLORS['success']
+    }
+    
+    condition_labels = {
+        'condition_1_vs_2': 'Condition 1 vs 2',
+        'condition_1_vs_3': 'Condition 1 vs 3',
+        'condition_2_vs_3': 'Condition 2 vs 3', 
+        'all_conditions': 'All Conditions (1,2,3)'
+    }
+    
+    # 1. 时间序列对比 (左上)
+    ax1 = axes[0, 0]
+    for condition_name, fisher_scores in condition_fisher_scores.items():
+        if condition_name in condition_colors:
+            ax1.plot(time_points, fisher_scores, linewidth=2.5,
+                    color=condition_colors[condition_name], alpha=0.8,
+                    label=condition_labels.get(condition_name, condition_name))
+    
+    # 添加时期标记
+    ax1.axvspan(0, stimulus_start, alpha=0.15, color=cfg.BASELINE_COLOR, label='Baseline')
+    ax1.axvspan(stimulus_start, stimulus_end, alpha=0.15, color=cfg.STIMULUS_COLOR, label='Stimulus')
+    ax1.axvspan(stimulus_end, len(time_points), alpha=0.15, color=cfg.RESPONSE_COLOR, label='Response')
+    
+    ax1.set_xlabel(f'Time ({cfg.TIME_UNIT})')
+    ax1.set_ylabel('Fisher Information Score')
+    ax1.set_title('Fisher Information by Condition Over Time')
+    ax1.legend()
+    ax1.grid(True, alpha=0.3)
+    
+    # 2. 刺激期均值对比 (右上)
+    ax2 = axes[0, 1]
+    conditions = []
+    stimulus_means = []
+    colors = []
+    
+    for condition_name, fisher_scores in condition_fisher_scores.items():
+        if condition_name in condition_colors:
+            conditions.append(condition_labels.get(condition_name, condition_name))
+            stimulus_means.append(np.mean(fisher_scores[stimulus_start:stimulus_end]))
+            colors.append(condition_colors[condition_name])
+    
+    bars = ax2.bar(range(len(conditions)), stimulus_means, color=colors, alpha=0.7, 
+                   edgecolor='black', linewidth=1.2)
+    
+    # 添加数值标签
+    for bar, value in zip(bars, stimulus_means):
+        ax2.text(bar.get_x() + bar.get_width()/2, bar.get_height() + max(stimulus_means) * 0.02,
+                f'{value:.3f}', ha='center', va='bottom', fontweight='bold')
+    
+    ax2.set_xticks(range(len(conditions)))
+    ax2.set_xticklabels(conditions, rotation=45, ha='right')
+    ax2.set_ylabel('Mean Fisher Information')
+    ax2.set_title('Fisher Information During Stimulus Period')
+    ax2.grid(True, axis='y', alpha=0.3)
+    
+    # 3. 峰值对比 (左下)
+    ax3 = axes[1, 0]
+    peak_values = []
+    peak_times = []
+    
+    for condition_name, fisher_scores in condition_fisher_scores.items():
+        if condition_name in condition_colors:
+            peak_idx = np.argmax(fisher_scores)
+            peak_values.append(fisher_scores[peak_idx])
+            peak_times.append(time_points[peak_idx])
+    
+    bars = ax3.bar(range(len(conditions)), peak_values, color=colors, alpha=0.7,
+                   edgecolor='black', linewidth=1.2)
+    
+    # 添加峰值时间信息
+    for i, (bar, peak_val, peak_time) in enumerate(zip(bars, peak_values, peak_times)):
+        ax3.text(bar.get_x() + bar.get_width()/2, bar.get_height() + max(peak_values) * 0.02,
+                f'{peak_val:.3f}\n@t={peak_time}', ha='center', va='bottom', 
+                fontweight='bold', fontsize=9)
+    
+    ax3.set_xticks(range(len(conditions)))
+    ax3.set_xticklabels(conditions, rotation=45, ha='right')
+    ax3.set_ylabel('Peak Fisher Information')
+    ax3.set_title('Peak Fisher Information Values')
+    ax3.grid(True, axis='y', alpha=0.3)
+    
+    # 4. 总体统计对比 (右下)
+    ax4 = axes[1, 1]
+    overall_means = []
+    overall_stds = []
+    
+    for condition_name, fisher_scores in condition_fisher_scores.items():
+        if condition_name in condition_colors:
+            overall_means.append(np.mean(fisher_scores))
+            overall_stds.append(np.std(fisher_scores))
+    
+    bars = ax4.bar(range(len(conditions)), overall_means, yerr=overall_stds, 
+                   capsize=5, color=colors, alpha=0.7, edgecolor='black', linewidth=1.2)
+    
+    # 添加数值标签
+    for bar, mean_val, std_val in zip(bars, overall_means, overall_stds):
+        ax4.text(bar.get_x() + bar.get_width()/2, bar.get_height() + std_val + max(overall_means) * 0.02,
+                f'{mean_val:.3f}±{std_val:.3f}', ha='center', va='bottom', 
+                fontweight='bold', fontsize=9)
+    
+    ax4.set_xticks(range(len(conditions)))
+    ax4.set_xticklabels(conditions, rotation=45, ha='right')
+    ax4.set_ylabel('Overall Fisher Information')
+    ax4.set_title('Overall Fisher Information Statistics')
+    ax4.grid(True, axis='y', alpha=0.3)
+    
+    plt.suptitle('Comprehensive Fisher Information Analysis by Condition', 
+                 fontsize=16, fontweight='bold')
+    plt.tight_layout()
+    
+    if save_path:
+        plt.savefig(save_path, dpi=cfg.VISUALIZATION_DPI, bbox_inches='tight')
+        print(f"Condition-wise Fisher information plot saved to: {save_path}")
     plt.show()
 
 
@@ -2917,10 +3196,24 @@ if __name__ == '__main__':
         fisher_scores = calculate_fisher_information(segments, new_labels, rr_results['rr_neurons'])
         save_fisher_information(fisher_scores, np.arange(len(fisher_scores)), save_dir=results_dir)
         
+        # 计算分条件Fisher信息
+        print("\n=== 分条件Fisher信息分析 ===")
+        condition_fisher_scores = calculate_fisher_information_by_condition(
+            segments, new_labels, rr_results['rr_neurons'])
+        save_fisher_information_by_condition(condition_fisher_scores, 
+                                           np.arange(len(fisher_scores)), 
+                                           save_dir=results_dir)
+        
         # 可视化Fisher信息
         print("\n=== Fisher信息可视化 ===")
         visualize_fisher_information(fisher_scores, np.arange(len(fisher_scores)),
                                    save_path=os.path.join(figures_dir, 'fisher_information.png'))
+        
+        # 可视化分条件Fisher信息
+        print("\n=== 分条件Fisher信息可视化 ===")
+        visualize_fisher_information_by_condition(condition_fisher_scores,
+                                                np.arange(len(fisher_scores)),
+                                                save_path=os.path.join(figures_dir, 'fisher_information_by_condition.png'))
         
         # 可视化Fisher信息热图
         print("生成Fisher信息热图...")

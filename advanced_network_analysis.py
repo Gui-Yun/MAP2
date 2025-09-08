@@ -5,6 +5,8 @@
 
 # %% 导入必要的库
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')  # 设置为非交互式后端，防止弹出窗口
 import matplotlib.pyplot as plt
 import seaborn as sns
 import networkx as nx
@@ -55,6 +57,7 @@ class AdvancedAnalysisConfig:
     FIGURE_SIZE = (12, 8)
     FIGURE_SIZE_LARGE = (15, 10)
     DPI = 300
+    VISUALIZATION_DPI = 300
     
     # 结果保存路径
     RESULTS_DIR = 'results/advanced_analysis'
@@ -63,6 +66,15 @@ class AdvancedAnalysisConfig:
     def ensure_results_dir(cls):
         """确保结果目录存在"""
         os.makedirs(cls.RESULTS_DIR, exist_ok=True)
+    
+    @classmethod
+    def get_results_dir(cls):
+        """获取版本感知的结果保存路径"""
+        # 使用版本感知的路径管理
+        base_dir = cfg.get_results_dir() if hasattr(cfg, 'get_results_dir') else 'results'
+        advanced_dir = os.path.join(base_dir, 'advanced_analysis')
+        os.makedirs(advanced_dir, exist_ok=True)
+        return advanced_dir
 
 # 实例化配置
 acfg = AdvancedAnalysisConfig()
@@ -804,11 +816,127 @@ def visualize_pid_results(pid_results, title="Partial Information Decomposition"
             plt.savefig(save_path.replace('.png', '_breakdown.png'), dpi=300, bbox_inches='tight', facecolor='white')
         plt.show()
 
-def save_rich_club_analysis(rich_club_results, condition_name, save_dir=acfg.RESULTS_DIR):
+def visualize_pid_conditions_comparison(pid_conditions_dict, save_path=None):
+    """
+    可视化多条件PID结果对比
+    
+    参数:
+    pid_conditions_dict: 多条件PID结果字典
+    save_path: 保存路径
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+    
+    # 设置科研绘图风格
+    plt.style.use('default')
+    plt.rcParams.update({
+        'font.size': 12,
+        'axes.titlesize': 14,
+        'axes.labelsize': 12,
+        'font.family': 'Arial',
+        'axes.spines.top': False,
+        'axes.spines.right': False,
+        'figure.dpi': 300
+    })
+    
+    # 提取所有条件和神经元对类型
+    conditions = list(pid_conditions_dict.keys())
+    if not conditions:
+        return
+    
+    # 获取第一个条件的神经元对类型作为参考
+    first_condition = conditions[0]
+    if 'pid_results' not in pid_conditions_dict[first_condition]:
+        return
+        
+    pair_types = list(pid_conditions_dict[first_condition]['pid_results'].keys())
+    
+    # PID成分
+    components = ['redundancy_mean', 'unique_X1_mean', 'unique_X2_mean', 'synergy_mean']
+    component_labels = ['Redundancy', 'Unique X1', 'Unique X2', 'Synergy']
+    component_colors = ['#E74C3C', '#3498DB', '#2ECC71', '#F39C12']
+    
+    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+    
+    # 为每种神经元对类型创建一个子图
+    for idx, pair_type in enumerate(pair_types):
+        if idx >= 4:  # 最多显示4种类型
+            break
+            
+        ax = axes[idx // 2, idx % 2]
+        
+        # 收集数据
+        condition_names = []
+        component_values = {comp: [] for comp in components}
+        component_errors = {comp: [] for comp in components}
+        
+        for condition in conditions:
+            if (condition in pid_conditions_dict and 
+                'pid_results' in pid_conditions_dict[condition] and
+                pair_type in pid_conditions_dict[condition]['pid_results']):
+                
+                condition_names.append(condition.replace('_', ' ').title())
+                results = pid_conditions_dict[condition]['pid_results'][pair_type]
+                
+                for comp in components:
+                    value = results.get(comp, 0)
+                    component_values[comp].append(value)
+                    
+                    # 获取标准差
+                    std_key = comp.replace('_mean', '_std')
+                    error = results.get(std_key, 0)
+                    component_errors[comp].append(error)
+        
+        if not condition_names:
+            continue
+            
+        # 创建分组条形图
+        x = np.arange(len(condition_names))
+        width = 0.2
+        
+        for i, (comp, label, color) in enumerate(zip(components, component_labels, component_colors)):
+            values = component_values[comp]
+            errors = component_errors[comp]
+            
+            bars = ax.bar(x + i * width, values, width, label=label,
+                         color=color, alpha=0.8, edgecolor='black', linewidth=0.8,
+                         yerr=errors, capsize=3)
+            
+            # 添加数值标签
+            for bar, value in zip(bars, values):
+                if value > 0.01:  # 只对较大的值添加标签
+                    ax.text(bar.get_x() + bar.get_width()/2, 
+                           bar.get_height() + max(errors) * 0.1,
+                           f'{value:.3f}', ha='center', va='bottom', 
+                           fontsize=9, fontweight='bold')
+        
+        ax.set_xlabel('Condition')
+        ax.set_ylabel('Information (bits)')
+        ax.set_title(f'PID Components - {pair_type.replace("_", "-").title()}')
+        ax.set_xticks(x + width * 1.5)
+        ax.set_xticklabels(condition_names, rotation=45, ha='right')
+        ax.legend()
+        ax.grid(True, axis='y', alpha=0.3)
+    
+    # 隐藏未使用的子图
+    for idx in range(len(pair_types), 4):
+        axes[idx // 2, idx % 2].set_visible(False)
+    
+    plt.suptitle('Partial Information Decomposition - Multi-Condition Comparison', 
+                 fontsize=16, fontweight='bold')
+    plt.tight_layout()
+    
+    if save_path:
+        plt.savefig(save_path, dpi=acfg.VISUALIZATION_DPI, bbox_inches='tight')
+        print(f"Multi-condition PID comparison saved to: {save_path}")
+    plt.show()
+
+def save_rich_club_analysis(rich_club_results, condition_name, save_dir=None):
     """
     保存富人俱乐部分析结果
     """
-    acfg.ensure_results_dir()
+    if save_dir is None:
+        save_dir = acfg.get_results_dir()
     
     filename = f"rich_club_analysis_{condition_name}.npz"
     
@@ -832,11 +960,12 @@ def save_rich_club_analysis(rich_club_results, condition_name, save_dir=acfg.RES
     )
     print(f"富人俱乐部分析结果已保存: {filename}")
 
-def save_pid_analysis(pid_results, condition_name, save_dir=acfg.RESULTS_DIR):
+def save_pid_analysis(pid_results, condition_name, save_dir=None):
     """
     保存信息分解分析结果
     """
-    acfg.ensure_results_dir()
+    if save_dir is None:
+        save_dir = acfg.get_results_dir()
     
     filename = f"pid_analysis_{condition_name}.npz"
     
@@ -874,6 +1003,411 @@ def save_pid_analysis(pid_results, condition_name, save_dir=acfg.RESULTS_DIR):
         **save_data
     )
     print(f"信息分解分析结果已保存: {filename}")
+
+# %% 表征稳定性分析函数
+
+def analyze_representational_stability(segments, labels, rr_neurons, stimulus_window=None):
+    """
+    分析神经表征的稳定性 - 核心假说：结构化刺激应诱发比噪声更稳定的神经活动模式
+    
+    参数:
+    segments: 神经数据片段 (trials, neurons, timepoints)
+    labels: 标签数组
+    rr_neurons: RR神经元索引
+    stimulus_window: 刺激时间窗口，如果为None则使用配置的默认值
+    
+    返回:
+    stability_results: 表征稳定性分析结果
+    """
+    print("=" * 50)
+    print("表征稳定性分析")
+    print("=" * 50)
+    print("核心假说：结构化刺激应诱发比噪声更稳定的神经活动模式")
+    print("-" * 50)
+    
+    # 过滤有效数据
+    valid_mask = labels != 0
+    valid_segments = segments[valid_mask][:, rr_neurons, :]
+    valid_labels = labels[valid_mask]
+    
+    # 确定刺激时间窗口
+    if stimulus_window is None:
+        stimulus_window = np.arange(acfg.STIMULUS_START,
+                                   min(acfg.STIMULUS_START + acfg.STIMULUS_DURATION,
+                                       valid_segments.shape[2]))
+    
+    print(f"分析参数:")
+    print(f"- 有效试次数: {len(valid_segments)}")
+    print(f"- RR神经元数: {len(rr_neurons)}")
+    print(f"- 刺激时间窗口: {stimulus_window[0]}-{stimulus_window[-1]} 时间点")
+    
+    # 提取刺激期神经活动
+    neural_activity = valid_segments[:, :, stimulus_window]
+    
+    # 将神经活动数据展平为向量（trial x features）
+    # features = neurons * timepoints
+    n_trials, n_neurons, n_timepoints = neural_activity.shape
+    neural_vectors = neural_activity.reshape(n_trials, n_neurons * n_timepoints)
+    
+    print(f"- 神经向量维度: {neural_vectors.shape} (trials x features)")
+    
+    # 第一步：计算各类刺激的"神经模板"
+    print("\n第一步：计算神经模板...")
+    unique_labels = np.unique(valid_labels)
+    neural_templates = {}
+    condition_trials = {}
+    
+    for condition in unique_labels:
+        condition_mask = valid_labels == condition
+        condition_data = neural_vectors[condition_mask]
+        condition_trials[condition] = condition_data
+        
+        # 计算该条件的神经模板（跨试次平均）
+        neural_templates[condition] = np.mean(condition_data, axis=0)
+        
+        print(f"  条件 {condition}: {np.sum(condition_mask)} 个试次")
+        print(f"    模板向量统计: 均值={np.mean(neural_templates[condition]):.4f}, "
+              f"标准差={np.std(neural_templates[condition]):.4f}")
+    
+    # 第二步：计算"试次-模板相似度"
+    print("\n第二步：计算试次-模板相似度...")
+    trial_template_similarities = {}
+    
+    for condition in unique_labels:
+        print(f"  处理条件 {condition}...")
+        
+        condition_data = condition_trials[condition]
+        template = neural_templates[condition]
+        similarities = []
+        
+        # 计算每个试次与其模板的相关系数
+        for i, trial_vector in enumerate(condition_data):
+            # 计算皮尔逊相关系数
+            correlation, _ = pearsonr(trial_vector, template)
+            similarities.append(correlation)
+            
+            if i < 5:  # 只打印前5个试次的结果作为示例
+                print(f"    试次 {i+1}: 相关系数 = {correlation:.4f}")
+        
+        trial_template_similarities[condition] = np.array(similarities)
+        
+        print(f"  条件 {condition} 统计:")
+        print(f"    平均相似度: {np.mean(similarities):.4f} ± {np.std(similarities):.4f}")
+        print(f"    相似度范围: [{np.min(similarities):.4f}, {np.max(similarities):.4f}]")
+    
+    # 第三步：统计检验
+    print("\n第三步：统计检验...")
+    similarity_values = [trial_template_similarities[cond] for cond in unique_labels]
+    
+    # ANOVA检验
+    try:
+        from scipy.stats import f_oneway
+        f_stat, p_anova = f_oneway(*similarity_values)
+        print(f"ANOVA检验: F = {f_stat:.4f}, p = {p_anova:.6f}")
+    except Exception as e:
+        print(f"ANOVA检验失败: {e}")
+        f_stat, p_anova = np.nan, np.nan
+    
+    # 两两比较
+    pairwise_comparisons = {}
+    if len(unique_labels) >= 2:
+        print("\n两两比较（t检验）:")
+        from scipy.stats import ttest_ind
+        
+        for i, cond1 in enumerate(unique_labels):
+            for j, cond2 in enumerate(unique_labels):
+                if i < j:  # 避免重复比较
+                    t_stat, p_value = ttest_ind(
+                        trial_template_similarities[cond1],
+                        trial_template_similarities[cond2]
+                    )
+                    pairwise_comparisons[f"{cond1}_vs_{cond2}"] = {
+                        't_stat': t_stat,
+                        'p_value': p_value
+                    }
+                    
+                    significance = "***" if p_value < 0.001 else ("**" if p_value < 0.01 else ("*" if p_value < 0.05 else "ns"))
+                    print(f"  条件 {cond1} vs 条件 {cond2}: t = {t_stat:.4f}, p = {p_value:.6f} {significance}")
+    
+    # 计算效应量（Cohen's d）
+    effect_sizes = {}
+    if len(unique_labels) >= 2:
+        print("\n效应量（Cohen's d）:")
+        for comparison_name, stats in pairwise_comparisons.items():
+            cond1, cond2 = comparison_name.split('_vs_')
+            cond1, cond2 = int(cond1), int(cond2)
+            
+            sim1 = trial_template_similarities[cond1]
+            sim2 = trial_template_similarities[cond2]
+            
+            # Cohen's d计算
+            pooled_std = np.sqrt(((len(sim1) - 1) * np.var(sim1, ddof=1) + 
+                                 (len(sim2) - 1) * np.var(sim2, ddof=1)) / 
+                                (len(sim1) + len(sim2) - 2))
+            
+            if pooled_std > 0:
+                cohens_d = (np.mean(sim1) - np.mean(sim2)) / pooled_std
+                effect_sizes[comparison_name] = cohens_d
+                
+                effect_size_interpretation = ("小" if abs(cohens_d) < 0.5 else 
+                                            ("中" if abs(cohens_d) < 0.8 else "大"))
+                print(f"  {comparison_name}: Cohen's d = {cohens_d:.4f} ({effect_size_interpretation}效应)")
+    
+    # 汇总分析结果
+    stability_results = {
+        'neural_templates': neural_templates,
+        'trial_template_similarities': trial_template_similarities,
+        'similarity_statistics': {
+            condition: {
+                'mean': np.mean(similarities),
+                'std': np.std(similarities),
+                'min': np.min(similarities),
+                'max': np.max(similarities),
+                'median': np.median(similarities),
+                'n_trials': len(similarities)
+            } for condition, similarities in trial_template_similarities.items()
+        },
+        'statistical_tests': {
+            'anova_f': f_stat,
+            'anova_p': p_anova,
+            'pairwise_comparisons': pairwise_comparisons,
+            'effect_sizes': effect_sizes
+        },
+        'analysis_parameters': {
+            'n_conditions': len(unique_labels),
+            'conditions': list(unique_labels),
+            'stimulus_window': stimulus_window.tolist(),
+            'n_rr_neurons': len(rr_neurons),
+            'feature_dimension': neural_vectors.shape[1]
+        }
+    }
+    
+    print("\n表征稳定性分析完成！")
+    return stability_results
+
+def visualize_representational_stability(stability_results, save_path=None):
+    """
+    可视化表征稳定性分析结果
+    
+    参数:
+    stability_results: 稳定性分析结果
+    save_path: 保存路径
+    """
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    
+    # 设置专业绘图风格
+    plt.style.use('default')
+    plt.rcParams.update({
+        'font.size': 12,
+        'axes.titlesize': 14,
+        'axes.labelsize': 12,
+        'font.family': 'Arial',
+        'axes.spines.top': False,
+        'axes.spines.right': False,
+        'figure.dpi': 300,
+        'savefig.dpi': 300,
+        'savefig.bbox': 'tight'
+    })
+    
+    # 提取数据
+    similarities = stability_results['trial_template_similarities']
+    stats = stability_results['similarity_statistics']
+    conditions = stability_results['analysis_parameters']['conditions']
+    
+    # 创建图形
+    fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+    
+    # 专业配色方案
+    colors = ['#2E86AB', '#A23B72', '#F18F01', '#C73E1D'][:len(conditions)]
+    
+    # 1. 小提琴图 + 箱形图
+    ax1 = axes[0]
+    
+    # 准备数据
+    plot_data = []
+    plot_labels = []
+    for condition in conditions:
+        plot_data.extend(similarities[condition])
+        plot_labels.extend([f'Condition {condition}'] * len(similarities[condition]))
+    
+    # 创建DataFrame用于seaborn
+    import pandas as pd
+    df = pd.DataFrame({
+        'Similarity': plot_data,
+        'Condition': plot_labels
+    })
+    
+    # 绘制小提琴图
+    violin_parts = ax1.violinplot([similarities[cond] for cond in conditions], 
+                                 positions=range(len(conditions)),
+                                 showmeans=True, showmedians=True)
+    
+    # 设置小提琴图颜色
+    for i, pc in enumerate(violin_parts['bodies']):
+        pc.set_facecolor(colors[i])
+        pc.set_alpha(0.7)
+    
+    # 添加箱形图
+    box_parts = ax1.boxplot([similarities[cond] for cond in conditions],
+                           positions=range(len(conditions)),
+                           patch_artist=True, widths=0.3,
+                           boxprops=dict(alpha=0.8),
+                           medianprops=dict(color='black', linewidth=2))
+    
+    # 设置箱形图颜色
+    for i, patch in enumerate(box_parts['boxes']):
+        patch.set_facecolor(colors[i])
+        patch.set_alpha(0.9)
+    
+    ax1.set_xlabel('Stimulus Condition', fontweight='bold')
+    ax1.set_ylabel('Trial-Template Similarity\n(Pearson Correlation)', fontweight='bold')
+    ax1.set_title('Representational Stability Across Conditions', fontweight='bold', pad=15)
+    ax1.set_xticks(range(len(conditions)))
+    ax1.set_xticklabels([f'Condition {c}' for c in conditions])
+    ax1.grid(True, axis='y', alpha=0.3)
+    
+    # 2. 统计比较图
+    ax2 = axes[1]
+    
+    # 计算均值和标准误
+    means = [stats[cond]['mean'] for cond in conditions]
+    stds = [stats[cond]['std'] for cond in conditions]
+    sems = [std / np.sqrt(stats[cond]['n_trials']) for cond, std in zip(conditions, stds)]
+    
+    bars = ax2.bar(range(len(conditions)), means, yerr=sems,
+                   color=colors, alpha=0.8, capsize=5,
+                   edgecolor='black', linewidth=1.5,
+                   error_kw={'linewidth': 2, 'capthick': 2})
+    
+    # 添加数值标签
+    for i, (mean, sem) in enumerate(zip(means, sems)):
+        ax2.text(i, mean + sem + 0.01, f'{mean:.3f}', 
+                ha='center', va='bottom', fontweight='bold', fontsize=11)
+    
+    # 添加显著性标记
+    pairwise = stability_results['statistical_tests']['pairwise_comparisons']
+    y_max = max([m + s for m, s in zip(means, sems)])
+    y_offset = 0.05
+    
+    comparison_pairs = [(0, 1), (0, 2), (1, 2)] if len(conditions) >= 3 else [(0, 1)] if len(conditions) >= 2 else []
+    
+    for i, (idx1, idx2) in enumerate(comparison_pairs):
+        if idx1 < len(conditions) and idx2 < len(conditions):
+            cond1, cond2 = conditions[idx1], conditions[idx2]
+            comparison_key = f"{cond1}_vs_{cond2}"
+            
+            if comparison_key in pairwise:
+                p_val = pairwise[comparison_key]['p_value']
+                significance = "***" if p_val < 0.001 else ("**" if p_val < 0.01 else ("*" if p_val < 0.05 else "ns"))
+                
+                if significance != "ns":
+                    y_pos = y_max + y_offset * (i + 1)
+                    ax2.plot([idx1, idx2], [y_pos, y_pos], 'k-', linewidth=1.5)
+                    ax2.plot([idx1, idx1], [y_pos - 0.01, y_pos], 'k-', linewidth=1.5)
+                    ax2.plot([idx2, idx2], [y_pos - 0.01, y_pos], 'k-', linewidth=1.5)
+                    ax2.text((idx1 + idx2) / 2, y_pos + 0.01, significance, 
+                            ha='center', va='bottom', fontweight='bold', fontsize=12)
+    
+    ax2.set_xlabel('Stimulus Condition', fontweight='bold')
+    ax2.set_ylabel('Mean Trial-Template Similarity\n(± SEM)', fontweight='bold')
+    ax2.set_title('Statistical Comparison', fontweight='bold', pad=15)
+    ax2.set_xticks(range(len(conditions)))
+    ax2.set_xticklabels([f'Condition {c}' for c in conditions])
+    ax2.grid(True, axis='y', alpha=0.3)
+    
+    # 3. 分布密度图
+    ax3 = axes[2]
+    
+    for i, condition in enumerate(conditions):
+        sim_data = similarities[condition]
+        
+        # 绘制密度曲线
+        from scipy import stats as scipy_stats
+        density = scipy_stats.gaussian_kde(sim_data)
+        xs = np.linspace(sim_data.min(), sim_data.max(), 200)
+        density_curve = density(xs)
+        
+        ax3.fill_between(xs, density_curve, alpha=0.6, color=colors[i], 
+                        label=f'Condition {condition}')
+        ax3.plot(xs, density_curve, color=colors[i], linewidth=2.5)
+        
+        # 添加均值线
+        mean_val = np.mean(sim_data)
+        ax3.axvline(mean_val, color=colors[i], linestyle='--', linewidth=2, alpha=0.8)
+    
+    ax3.set_xlabel('Trial-Template Similarity', fontweight='bold')
+    ax3.set_ylabel('Probability Density', fontweight='bold')
+    ax3.set_title('Similarity Distribution', fontweight='bold', pad=15)
+    ax3.legend(frameon=True, fancybox=True, shadow=True)
+    ax3.grid(True, alpha=0.3)
+    
+    # 整体标题
+    fig.suptitle('Neural Representational Stability Analysis', 
+                fontsize=16, fontweight='bold', y=0.98)
+    
+    # 添加统计信息文本框
+    anova_p = stability_results['statistical_tests']['anova_p']
+    if not np.isnan(anova_p):
+        anova_text = f"ANOVA: p = {anova_p:.4f}"
+        fig.text(0.02, 0.02, anova_text, fontsize=10, 
+                bbox=dict(boxstyle="round,pad=0.3", facecolor='lightgray', alpha=0.8))
+    
+    plt.tight_layout()
+    
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight', facecolor='white')
+        print(f"表征稳定性可视化结果已保存: {save_path}")
+    plt.show()
+
+def save_representational_stability_results(stability_results, condition_name="all_conditions", save_dir=None):
+    """
+    保存表征稳定性分析结果
+    
+    参数:
+    stability_results: 稳定性分析结果
+    condition_name: 条件名称
+    save_dir: 保存目录
+    """
+    if save_dir is None:
+        save_dir = acfg.get_results_dir()
+    
+    filename = f"representational_stability_{condition_name}.npz"
+    
+    # 准备保存数据
+    save_data = {}
+    
+    # 保存相似度数据
+    for condition, similarities in stability_results['trial_template_similarities'].items():
+        save_data[f'similarities_condition_{condition}'] = similarities
+    
+    # 保存统计数据
+    for condition, stats in stability_results['similarity_statistics'].items():
+        for stat_name, stat_value in stats.items():
+            save_data[f'stats_condition_{condition}_{stat_name}'] = stat_value
+    
+    # 保存统计检验结果
+    save_data['anova_f'] = stability_results['statistical_tests']['anova_f']
+    save_data['anova_p'] = stability_results['statistical_tests']['anova_p']
+    
+    # 保存两两比较结果
+    for comparison_name, results in stability_results['statistical_tests']['pairwise_comparisons'].items():
+        save_data[f'pairwise_{comparison_name}_t'] = results['t_stat']
+        save_data[f'pairwise_{comparison_name}_p'] = results['p_value']
+    
+    # 保存效应量
+    for comparison_name, effect_size in stability_results['statistical_tests']['effect_sizes'].items():
+        save_data[f'effect_size_{comparison_name}'] = effect_size
+    
+    # 保存分析参数
+    for param_name, param_value in stability_results['analysis_parameters'].items():
+        save_data[f'param_{param_name}'] = param_value
+    
+    np.savez_compressed(
+        os.path.join(save_dir, filename),
+        **save_data
+    )
+    print(f"表征稳定性分析结果已保存: {filename}")
 
 # %% 主分析函数
 
@@ -941,7 +1475,7 @@ def run_rich_club_analysis_by_condition(segments, labels, rr_neurons):
 
 def run_pid_analysis_by_condition(segments, labels, rr_neurons):
     """
-    跨条件进行信息分解分析（修正版本）
+    按条件分别进行信息分解分析
     
     参数:
     segments: 神经数据片段
@@ -949,9 +1483,9 @@ def run_pid_analysis_by_condition(segments, labels, rr_neurons):
     rr_neurons: RR神经元索引
     
     返回:
-    condition_results: 信息分解分析结果
+    condition_results: 各条件的信息分解分析结果
     """
-    print("进行跨条件信息分解（PID）分析...")
+    print("进行按条件分别的信息分解（PID）分析...")
     
     # 过滤有效数据
     valid_mask = labels != 0
@@ -961,10 +1495,6 @@ def run_pid_analysis_by_condition(segments, labels, rr_neurons):
     unique_labels = np.unique(valid_labels)
     print(f"发现标签类别: {unique_labels}")
     
-    if len(unique_labels) < 2:
-        print("警告: 需要至少2个不同的标签类别进行信息分解分析")
-        return {}
-    
     # 检查每个类别的试次数
     label_counts = {}
     for label in unique_labels:
@@ -972,39 +1502,56 @@ def run_pid_analysis_by_condition(segments, labels, rr_neurons):
         label_counts[label] = count
         print(f"标签 {label}: {count} 个试次")
     
-    # 过滤掉试次数过少的标签
-    valid_labels_filtered = []
-    for label in unique_labels:
-        if label_counts[label] >= 10:  # 至少10个试次
-            valid_labels_filtered.append(label)
-    
-    if len(valid_labels_filtered) < 2:
-        print("警告: 每个类别至少需要10个试次进行信息分解分析")
-        return {}
-    
-    print(f"使用标签类别进行分析: {valid_labels_filtered}")
-    
-    # 只使用有足够试次的数据
-    analysis_mask = np.isin(valid_labels, valid_labels_filtered)
-    analysis_segments = valid_segments[analysis_mask]
-    analysis_labels = valid_labels[analysis_mask]
-    
-    print(f"分析数据维度: {analysis_segments.shape}")
-    print(f"分析标签分布: {dict(zip(*np.unique(analysis_labels, return_counts=True)))}")
-    
-    # 执行信息分解分析
-    pid_results = analyze_hub_peripheral_information_dynamics(
-        analysis_segments,
-        analysis_labels,
-        list(range(len(rr_neurons)))  # 使用连续索引
-    )
-    
     condition_results = {}
-    if pid_results is not None:
-        condition_results['multi_condition'] = pid_results
+    
+    # 定义要分析的条件对比
+    condition_pairs = [
+        ([1, 2], 'condition_1_vs_2'),
+        ([1, 3], 'condition_1_vs_3'), 
+        ([2, 3], 'condition_2_vs_3'),
+        ([1, 2, 3], 'all_conditions')  # 保留原始的全条件比较
+    ]
+    
+    for conditions, condition_name in condition_pairs:
+        print(f"\n--- 分析 {condition_name} ---")
         
-        # 保存结果
-        save_pid_analysis(pid_results, "multi_condition")
+        # 筛选当前条件的数据
+        condition_mask = np.isin(valid_labels, conditions)
+        available_conditions = [c for c in conditions if c in unique_labels and label_counts[c] >= 5]
+        
+        if len(available_conditions) < 2:
+            print(f"跳过 {condition_name}: 有效条件不足 (需要至少2个条件，每个条件至少5个试次)")
+            continue
+            
+        # 重新筛选数据
+        condition_mask = np.isin(valid_labels, available_conditions)
+        condition_segments = valid_segments[condition_mask]
+        condition_labels = valid_labels[condition_mask]
+        
+        print(f"使用条件: {available_conditions}")
+        print(f"数据维度: {condition_segments.shape}")
+        print(f"标签分布: {dict(zip(*np.unique(condition_labels, return_counts=True)))}")
+        
+        # 执行信息分解分析
+        try:
+            pid_results = analyze_hub_peripheral_information_dynamics(
+                condition_segments,
+                condition_labels,
+                list(range(len(rr_neurons)))  # 使用连续索引
+            )
+            
+            if pid_results is not None:
+                condition_results[condition_name] = pid_results
+                
+                # 保存结果
+                save_pid_analysis(pid_results, condition_name)
+                print(f"+ {condition_name} PID分析完成")
+            else:
+                print(f"X {condition_name} PID分析失败")
+                
+        except Exception as e:
+            print(f"X {condition_name} PID分析出错: {e}")
+            continue
     
     return condition_results
 
@@ -1018,8 +1565,9 @@ def run_advanced_network_analysis():
     print("高级网络分析：富人俱乐部组织 + 信息分解")
     print("=" * 60)
     
-    # 确保结果目录存在
-    acfg.ensure_results_dir()
+    # 确保结果目录存在（使用版本感知路径）
+    results_dir = acfg.get_results_dir()
+    print(f"结果将保存到: {results_dir}")
     
     # 1. 加载和预处理数据
     print("\n1. 数据加载与预处理")
@@ -1067,8 +1615,17 @@ def run_advanced_network_analysis():
     
     pid_results = run_pid_analysis_by_condition(segments, new_labels, rr_neurons)
     
-    # 4. 可视化分析结果
-    print("\n4. 可视化分析结果")
+    # 4. 表征稳定性分析
+    print("\n4. 表征稳定性分析")
+    print("-" * 30)
+    
+    stability_results = analyze_representational_stability(segments, new_labels, rr_neurons)
+    
+    # 保存表征稳定性结果
+    save_representational_stability_results(stability_results, save_dir=results_dir)
+    
+    # 5. 可视化分析结果
+    print("\n5. 可视化分析结果")
     print("-" * 30)
     
     # 可视化富人俱乐部分析结果
@@ -1077,7 +1634,7 @@ def run_advanced_network_analysis():
         visualize_rich_club_results(
             results, 
             condition_name=f"Condition {condition}",
-            save_path=os.path.join(acfg.RESULTS_DIR, f'rich_club_condition_{condition}.png')
+            save_path=os.path.join(results_dir, f'rich_club_condition_{condition}.png')
         )
     
     # 可视化信息分解分析结果
@@ -1086,37 +1643,53 @@ def run_advanced_network_analysis():
         visualize_pid_results(
             results,
             title=f"Partial Information Decomposition - Condition {condition}",
-            save_path=os.path.join(acfg.RESULTS_DIR, f'pid_condition_{condition}.png')
+            save_path=os.path.join(results_dir, f'pid_condition_{condition}.png')
         )
     
-    # 5. 综合分析和报告
-    print("\n5. 生成综合分析报告")
+    # 生成多条件对比可视化
+    if len(pid_results) > 1:
+        print("生成多条件PID对比可视化...")
+        visualize_pid_conditions_comparison(
+            pid_results,
+            save_path=os.path.join(results_dir, 'pid_conditions_comparison.png')
+        )
+    
+    # 可视化表征稳定性分析结果
+    print("生成表征稳定性可视化...")
+    visualize_representational_stability(
+        stability_results,
+        save_path=os.path.join(results_dir, 'representational_stability_analysis.png')
+    )
+    
+    # 6. 综合分析和报告
+    print("\n6. 生成综合分析报告")
     print("-" * 30)
     
-    report = generate_advanced_analysis_report(rich_club_results, pid_results)
+    report = generate_advanced_analysis_report(rich_club_results, pid_results, stability_results)
     
     # 保存报告
-    report_path = os.path.join(acfg.RESULTS_DIR, 'advanced_analysis_report.txt')
+    report_path = os.path.join(results_dir, 'advanced_analysis_report.txt')
     with open(report_path, 'w', encoding='utf-8') as f:
         f.write(report)
     
     print(f"\n高级网络分析完成！")
-    print(f"结果保存在: {acfg.RESULTS_DIR}")
+    print(f"结果保存在: {results_dir}")
     
     return {
         'rich_club_results': rich_club_results,
         'pid_results': pid_results,
+        'stability_results': stability_results,
         'report': report
     }
 
-def generate_advanced_analysis_report(rich_club_results, pid_results):
+def generate_advanced_analysis_report(rich_club_results, pid_results, stability_results=None):
     """
     生成高级分析报告
     """
     report = []
     report.append("=" * 60)
     report.append("高级网络分析报告")
-    report.append("富人俱乐部组织 + 部分信息分解（PID）")
+    report.append("富人俱乐部组织 + 部分信息分解（PID） + 表征稳定性")
     report.append("=" * 60)
     report.append("")
     
@@ -1187,8 +1760,74 @@ def generate_advanced_analysis_report(rich_club_results, pid_results):
     else:
         report.append("未进行信息分解分析")
     
+    # 表征稳定性分析结果
+    report.append("\n## 3. 表征稳定性分析")
+    report.append("")
+    
+    if stability_results:
+        # 分析参数
+        params = stability_results['analysis_parameters']
+        report.append(f"分析了 {params['n_conditions']} 个刺激条件的神经表征稳定性")
+        report.append(f"使用了 {params['n_rr_neurons']} 个响应可靠神经元")
+        report.append(f"特征向量维度: {params['feature_dimension']}")
+        report.append("")
+        
+        # 统计检验结果
+        stats = stability_results['statistical_tests']
+        if not np.isnan(stats['anova_p']):
+            significance_level = "高度显著" if stats['anova_p'] < 0.001 else ("显著" if stats['anova_p'] < 0.05 else "不显著")
+            report.append(f"ANOVA检验结果: F = {stats['anova_f']:.4f}, p = {stats['anova_p']:.6f} ({significance_level})")
+        
+        # 各条件的稳定性统计
+        stability_stats = stability_results['similarity_statistics']
+        sorted_conditions = sorted(stability_stats.keys(), key=lambda x: stability_stats[x]['mean'], reverse=True)
+        
+        report.append("\n各条件表征稳定性排序（按平均相似度）:")
+        for i, condition in enumerate(sorted_conditions, 1):
+            stats_cond = stability_stats[condition]
+            report.append(f"{i}. 条件 {condition}: 平均相似度 = {stats_cond['mean']:.4f} ± {stats_cond['std']:.4f}")
+            report.append(f"   相似度范围: [{stats_cond['min']:.4f}, {stats_cond['max']:.4f}], 试次数: {stats_cond['n_trials']}")
+        
+        # 两两比较的显著性
+        pairwise = stats['pairwise_comparisons']
+        if pairwise:
+            report.append("\n条件间差异显著性:")
+            for comparison, results in pairwise.items():
+                p_val = results['p_value']
+                significance = "***" if p_val < 0.001 else ("**" if p_val < 0.01 else ("*" if p_val < 0.05 else "ns"))
+                cond1, cond2 = comparison.split('_vs_')
+                report.append(f"- 条件 {cond1} vs 条件 {cond2}: p = {p_val:.6f} {significance}")
+        
+        # 效应量
+        effect_sizes = stats['effect_sizes']
+        if effect_sizes:
+            report.append("\n效应量分析:")
+            for comparison, d_value in effect_sizes.items():
+                effect_magnitude = "小" if abs(d_value) < 0.5 else ("中" if abs(d_value) < 0.8 else "大")
+                cond1, cond2 = comparison.split('_vs_')
+                direction = "条件"+cond1+"更稳定" if d_value > 0 else "条件"+cond2+"更稳定"
+                report.append(f"- {comparison}: Cohen's d = {d_value:.4f} ({effect_magnitude}效应, {direction})")
+        
+        # 核心发现解读
+        report.append("\n核心发现:")
+        if not np.isnan(stats['anova_p']) and stats['anova_p'] < 0.05:
+            report.append("- 不同刺激条件在神经表征稳定性上存在显著差异")
+            report.append("- 这支持了'结构化刺激诱发更稳定神经活动模式'的核心假说")
+            
+            # 找到最稳定和最不稳定的条件
+            most_stable = max(stability_stats.keys(), key=lambda x: stability_stats[x]['mean'])
+            least_stable = min(stability_stats.keys(), key=lambda x: stability_stats[x]['mean'])
+            report.append(f"- 条件 {most_stable} 表现出最高的表征稳定性 (相似度: {stability_stats[most_stable]['mean']:.4f})")
+            report.append(f"- 条件 {least_stable} 表现出最低的表征稳定性 (相似度: {stability_stats[least_stable]['mean']:.4f})")
+        else:
+            report.append("- 不同刺激条件的神经表征稳定性无显著差异")
+            report.append("- 这可能表明所有条件都能诱发相对稳定的神经活动模式")
+        
+    else:
+        report.append("未进行表征稳定性分析")
+    
     # 综合结论
-    report.append("\n## 3. 综合结论")
+    report.append("\n## 4. 综合结论")
     report.append("")
     
     # 富人俱乐部结论
@@ -1232,12 +1871,24 @@ def generate_advanced_analysis_report(rich_club_results, pid_results):
                 report.append("- 神经元对表现出平衡的信息处理模式")
                 report.append("- 协同和冗余信息处理并存")
     
+    # 表征稳定性结论
+    if stability_results:
+        stats = stability_results['statistical_tests']
+        if not np.isnan(stats['anova_p']) and stats['anova_p'] < 0.05:
+            stability_stats = stability_results['similarity_statistics']
+            most_stable = max(stability_stats.keys(), key=lambda x: stability_stats[x]['mean'])
+            report.append(f"- 表征稳定性分析验证了核心假说，条件 {most_stable} 诱发了最稳定的神经表征")
+            report.append("- 不同刺激条件的神经表征稳定性差异反映了V1对不同视觉输入的编码可靠性")
+        else:
+            report.append("- 所有条件均能诱发相对稳定的神经表征，表明V1编码的高度稳健性")
+    
     # 方法学价值
-    report.append("\n## 4. 方法学意义")
+    report.append("\n## 5. 方法学意义")
     report.append("")
     report.append("- 富人俱乐部分析揭示了网络的层次化拓扑组织原理")
-    report.append("- 信息分解分析量化了不同神经元组合的信息贡献模式")
-    report.append("- 两种方法的结合提供了从拓扑结构到信息流动的完整视角")
+    report.append("- 信息分解分析量化了不同神经元组合的信息贡献模式") 
+    report.append("- 表征稳定性分析直接验证了神经编码的可靠性假说")
+    report.append("- 三种方法的结合提供了从拓扑结构到信息流动再到编码稳定性的完整视角")
     
     return "\n".join(report)
 
@@ -1250,5 +1901,13 @@ if __name__ == "__main__":
     
     print("\n分析完成！主要发现:")
     print(f"- 富人俱乐部分析: {len(results['rich_club_results'])} 个条件")
-    print(f"- 信息分解分析: {len(results['pid_results'])} 个条件") 
-    print(f"- 详细报告: {acfg.RESULTS_DIR}/advanced_analysis_report.txt")
+    print(f"- 信息分解分析: {len(results['pid_results'])} 个条件")
+    print(f"- 表征稳定性分析: {results['stability_results']['analysis_parameters']['n_conditions']} 个条件")
+    if 'stability_results' in results and results['stability_results']:
+        stats = results['stability_results']['statistical_tests']
+        if not np.isnan(stats['anova_p']):
+            significance = "显著差异" if stats['anova_p'] < 0.05 else "无显著差异"
+            print(f"  核心假说验证: 条件间表征稳定性 {significance} (p={stats['anova_p']:.4f})")
+    # 获取实际的结果目录路径
+    actual_results_dir = acfg.get_results_dir()
+    print(f"- 详细报告: {actual_results_dir}/advanced_analysis_report.txt")

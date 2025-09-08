@@ -4,7 +4,10 @@
 
 # %% 导入必要的库
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')  # 设置为非交互式后端，防止弹出窗口
 import matplotlib.pyplot as plt
+import matplotlib
 import seaborn as sns
 import pandas as pd
 import networkx as nx
@@ -1823,8 +1826,8 @@ if __name__ == "__main__":
                 print(f"  平均路径长度: {metrics['avg_path_length']:.3f}")
             print(f"  小世界系数: {metrics['small_world_sigma']:.3f}")
     
-    # %% 创建保存目录
-    results_dir = os.path.join(cfg.DATA_PATH, 'network_results')
+    # %% 创建保存目录 - 使用统一路径配置
+    results_dir = cfg.get_results_dir()
     os.makedirs(results_dir, exist_ok=True)
     
     # %% 多阈值稳健性分析可视化

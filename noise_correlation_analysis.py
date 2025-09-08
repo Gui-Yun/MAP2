@@ -5,7 +5,10 @@
 
 # %% 导入必要的库
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')  # 设置为非交互式后端，防止弹出窗口
 import matplotlib.pyplot as plt
+
 import seaborn as sns
 import pandas as pd
 from scipy import stats
@@ -75,13 +78,19 @@ class NoiseCorrelationConfig:
         'background': '#F8F9FA'        # 背景色
     }
     
-    # 结果保存路径
-    RESULTS_DIR = 'results/noise_correlation'
+    # 结果保存路径 - 使用统一路径配置
+    @classmethod
+    def get_results_dir(cls):
+        """获取结果保存目录"""
+        from loaddata import cfg
+        return os.path.join(cfg.get_results_dir(), 'noise_correlation')
     
     @classmethod
     def ensure_results_dir(cls):
         """确保结果目录存在"""
-        os.makedirs(cls.RESULTS_DIR, exist_ok=True)
+        results_dir = cls.get_results_dir()
+        os.makedirs(results_dir, exist_ok=True)
+        return results_dir
 
 # 实例化配置
 ncfg = NoiseCorrelationConfig()
@@ -1416,7 +1425,7 @@ def visualize_hub_peripheral_analysis(hub_analysis, title="Hub-Peripheral Neuron
 
 def save_comparison_results(comparison_results, filename):
     """保存比较结果为结构化数据"""
-    ncfg.ensure_results_dir()
+    results_dir = ncfg.ensure_results_dir()
     
     # 保存噪音-信号相关性比较结果
     comparison_data = {}
@@ -1430,7 +1439,7 @@ def save_comparison_results(comparison_results, filename):
         comparison_data[f'{condition}_signal_std'] = np.std(results['signal_values'])
     
     np.savez_compressed(
-        os.path.join(ncfg.RESULTS_DIR, filename),
+        os.path.join(results_dir, filename),
         **comparison_data
     )
     print(f"比较结果已保存到 {filename}")
@@ -1445,7 +1454,7 @@ def run_noise_correlation_analysis():
     print("=" * 60)
     
     # 确保结果目录存在
-    ncfg.ensure_results_dir()
+    results_dir = ncfg.ensure_results_dir()
     
     # 1. 加载和预处理数据
     print("\n1. 数据加载与预处理")
@@ -1499,18 +1508,17 @@ def run_noise_correlation_analysis():
     print("\n3. 保存相关性矩阵")
     print("-" * 30)
     
-    ncfg.ensure_results_dir()
-    
+    # 保存相关性矩阵数据
     # 保存噪音相关性矩阵
     np.savez_compressed(
-        os.path.join(ncfg.RESULTS_DIR, 'noise_correlation_matrices.npz'),
+        os.path.join(results_dir, 'noise_correlation_matrices.npz'),
         **{f'condition_{k}': v for k, v in noise_correlations.items()}
     )
     print("噪音相关性矩阵已保存")
     
     # 保存信号相关性矩阵
     np.savez_compressed(
-        os.path.join(ncfg.RESULTS_DIR, 'signal_correlation_matrices.npz'),
+        os.path.join(results_dir, 'signal_correlation_matrices.npz'),
         **{f'condition_{k}': v for k, v in signal_correlations.items()}
     )
     print("信号相关性矩阵已保存")
@@ -1532,7 +1540,7 @@ def run_noise_correlation_analysis():
     
     # 保存置换结果
     np.savez_compressed(
-        os.path.join(ncfg.RESULTS_DIR, 'shuffle_fisher_results.npz'),
+        os.path.join(results_dir, 'shuffle_fisher_results.npz'),
         original_fisher_mean=shuffle_results['original_fisher_mean'],
         shuffle_fractions=shuffle_results['shuffle_fractions'],
         fisher_means=[shuffle_results['shuffle_results'][f]['fisher_value'] for f in shuffle_results['shuffle_fractions']],
@@ -1573,7 +1581,7 @@ def run_noise_correlation_analysis():
         }
     
     np.savez_compressed(
-        os.path.join(ncfg.RESULTS_DIR, 'network_metrics_comparison.npz'),
+        os.path.join(results_dir, 'network_metrics_comparison.npz'),
         **{f'{condition}_{metric}_{measure}': value 
            for condition, condition_data in network_comparison_results.items()
            for metric, metric_data in condition_data.items()
@@ -1601,7 +1609,7 @@ def run_noise_correlation_analysis():
         hub_analysis_results[f'{condition}_hub_vs_peripheral_p'] = analysis['statistics']['hub_vs_peripheral_internal']['p_value']
     
     np.savez_compressed(
-        os.path.join(ncfg.RESULTS_DIR, 'hub_peripheral_analysis.npz'),
+        os.path.join(results_dir, 'hub_peripheral_analysis.npz'),
         **hub_analysis_results
     )
     print("枢纽-边缘神经元分析结果已保存")
@@ -1615,7 +1623,7 @@ def run_noise_correlation_analysis():
     visualize_correlation_matrices(
         noise_correlations, signal_correlations,
         title="Noise vs Signal Correlation Matrices",
-        save_path=os.path.join(ncfg.RESULTS_DIR, 'correlation_matrices.png')
+        save_path=os.path.join(results_dir, 'correlation_matrices.png')
     )
     
     # 可视化噪音-信号相关性比较
@@ -1623,7 +1631,7 @@ def run_noise_correlation_analysis():
     visualize_noise_signal_comparison(
         comparison_results,
         title="Noise-Signal Correlation Comparison",
-        save_path=os.path.join(ncfg.RESULTS_DIR, 'noise_signal_comparison.png')
+        save_path=os.path.join(results_dir, 'noise_signal_comparison.png')
     )
     
     # 可视化神经元对的噪音-信号相关性散点图
@@ -1631,7 +1639,7 @@ def run_noise_correlation_analysis():
     visualize_neuron_pairs_scatter(
         noise_correlations, signal_correlations,
         title="Neuron Pairs: Noise vs Signal Correlations",
-        save_path=os.path.join(ncfg.RESULTS_DIR, 'neuron_pairs_scatter.png')
+        save_path=os.path.join(results_dir, 'neuron_pairs_scatter.png')
     )
     
     # 可视化置换效果
@@ -1639,7 +1647,7 @@ def run_noise_correlation_analysis():
     visualize_shuffle_effects(
         shuffle_results,
         title="Neuron Shuffling Effects on Fisher Information", 
-        save_path=os.path.join(ncfg.RESULTS_DIR, 'shuffle_effects.png')
+        save_path=os.path.join(results_dir, 'shuffle_effects.png')
     )
     
     # 可视化网络指标比较
@@ -1647,7 +1655,7 @@ def run_noise_correlation_analysis():
     visualize_network_metrics_comparison(
         noise_network_metrics, signal_network_metrics,
         title="Network Metrics: Noise vs Signal Networks",
-        save_path=os.path.join(ncfg.RESULTS_DIR, 'network_metrics_comparison.png')
+        save_path=os.path.join(results_dir, 'network_metrics_comparison.png')
     )
     
     # 可视化枢纽-边缘神经元分析
@@ -1655,7 +1663,7 @@ def run_noise_correlation_analysis():
     visualize_hub_peripheral_analysis(
         hub_analysis,
         title="Hub-Peripheral Neuron Noise Correlation Analysis",
-        save_path=os.path.join(ncfg.RESULTS_DIR, 'hub_peripheral_analysis.png')
+        save_path=os.path.join(results_dir, 'hub_peripheral_analysis.png')
     )
     
     # 9. 生成分析报告
@@ -1668,11 +1676,11 @@ def run_noise_correlation_analysis():
     )
     
     # 保存报告
-    report_path = os.path.join(ncfg.RESULTS_DIR, 'analysis_report.txt')
+    report_path = os.path.join(results_dir, 'analysis_report.txt')
     with open(report_path, 'w', encoding='utf-8') as f:
         f.write(report)
     
-    print(f"分析完成！结果保存在: {ncfg.RESULTS_DIR}")
+    print(f"分析完成！结果保存在: {results_dir}")
     return {
         'noise_correlations': noise_correlations,
         'signal_correlations': signal_correlations,
@@ -1823,11 +1831,11 @@ if __name__ == "__main__":
     
     print("\n专业科研风格噪音相关性分析完成！")
     print("主要结果文件:")
-    print(f"- 噪音vs信号相关性矩阵: {ncfg.RESULTS_DIR}/correlation_matrices.png")
-    print(f"- 噪音-信号相关性比较: {ncfg.RESULTS_DIR}/noise_signal_comparison.png")
-    print(f"- 神经元置换Fisher信息效果: {ncfg.RESULTS_DIR}/shuffle_effects.png")
-    print(f"- 网络指标专业对比: {ncfg.RESULTS_DIR}/network_metrics_comparison.png")
-    print(f"- 枢纽-边缘神经元分析: {ncfg.RESULTS_DIR}/hub_peripheral_analysis.png")
-    print(f"- 详细分析报告: {ncfg.RESULTS_DIR}/analysis_report.txt")
-    print(f"- 数据保存目录: {ncfg.RESULTS_DIR}/")
+    print(f"- 噪音vs信号相关性矩阵: {results_dir}/correlation_matrices.png")
+    print(f"- 噪音-信号相关性比较: {results_dir}/noise_signal_comparison.png")
+    print(f"- 神经元置换Fisher信息效果: {results_dir}/shuffle_effects.png")
+    print(f"- 网络指标专业对比: {results_dir}/network_metrics_comparison.png")
+    print(f"- 枢纽-边缘神经元分析: {results_dir}/hub_peripheral_analysis.png")
+    print(f"- 详细分析报告: {results_dir}/analysis_report.txt")
+    print(f"- 数据保存目录: {results_dir}/")
     print("\n所有图像均采用高分辨率科研绘图标准生成，适合论文发表使用。")

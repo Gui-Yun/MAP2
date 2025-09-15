@@ -1,6 +1,6 @@
 {
   "LOADER_VERSION": "old",
-  "DATA_PATH": "C:\\Users\\76629\\OneDrive\\brain\\Micedata\\M65_0816",
+  "DATA_PATH": "C:\\Users\\76629\\OneDrive\\brain\\Micedata\\M30_0420",
   "OLD_VERSION_PATHS": {
     "neurons": "C:\\Users\\76629\\OneDrive\\brain\\Micedata\\M30_0420\\Neurons.mat",
     "trials": "C:\\Users\\76629\\OneDrive\\brain\\Micedata\\M30_0420\\Trial_data.mat",

@@ -50,9 +50,11 @@ except Exception:
 
 try:
     # Fisher info and other helpers if available
-    from loaddata import calculate_fisher_information
+    from loaddata import calculate_fisher_information, calculate_fisher_information_by_condition, calculate_multivariate_fisher_single_timepoint
 except Exception:
     calculate_fisher_information = None
+    calculate_fisher_information_by_condition = None
+    calculate_multivariate_fisher_single_timepoint = None
 
 try:
     from loaddata import classify_by_timepoints
@@ -77,36 +79,112 @@ except Exception:
 # ---------------------------
 def setup_publication_style():
     plt.style.use('default')
+    # 确保Arial字体可用，否则回退到DejaVu Sans
+    font_family = 'Arial'
+    try:
+        plt.rcParams['font.family'] = font_family
+    except:
+        font_family = 'DejaVu Sans'
+        plt.rcParams['font.family'] = font_family
+    
     plt.rcParams.update({
-        'font.family': 'Arial',
-        'font.size': 10,
-        'axes.titlesize': 12,
-        'axes.labelsize': 11,
-        'xtick.labelsize': 9,
-        'ytick.labelsize': 9,
-        'legend.fontsize': 9,
-        'figure.titlesize': 14,
-        'axes.linewidth': 1.2,
+        # 严格的字体设置 - 科研发表标准
+        'font.family': font_family,
+        'font.size': 8,              # 基础字体8pt (Nature标准)
+        'axes.titlesize': 10,        # 子图标题 10pt
+        'axes.labelsize': 9,         # 坐标轴标签 9pt  
+        'xtick.labelsize': 8,        # 刻度标签 8pt
+        'ytick.labelsize': 8,
+        'legend.fontsize': 8,        # 图例 8pt
+        'figure.titlesize': 11,      # 主标题 11pt
+        
+        # 极简主义风格
+        'axes.linewidth': 1.0,       # 更细的轴线
         'axes.spines.top': False,
         'axes.spines.right': False,
-        'axes.edgecolor': '#2C3E50',
-        'axes.grid': False,
-        'grid.alpha': 0.3,
-        'grid.linewidth': 0.8,
+        'axes.edgecolor': '#666666', # 细灰色轴线
+        'axes.grid': False,          # 默认关闭网格
+        'grid.alpha': 0.2,           # 如需网格，使用更浅的颜色
+        'grid.linewidth': 0.5,       # 更细的网格线
+        'grid.color': '#CCCCCC',     # 浅灰色网格
+        
+        # 背景设置
         'figure.facecolor': 'white',
         'axes.facecolor': 'white',
-        'savefig.dpi': 300,
+        
+        # 输出设置 - 科研发表标准
+        'savefig.dpi': 600,          # 600 DPI for publication
         'savefig.bbox': 'tight',
         'savefig.facecolor': 'white',
         'savefig.edgecolor': 'none',
+        'savefig.pad_inches': 0.05,  # 最小边距
+        'text.usetex': False,        # 避免LaTeX依赖问题
+        'mathtext.fontset': 'dejavusans',  # 数学符号字体
+        
+        # 线条和标记
+        'lines.linewidth': 2.0,      # 稍粗的数据线
+        'lines.markersize': 4,       # 适中的标记大小
+        'patch.linewidth': 1.0,      # 图形边框
     })
 
 
+def save_figure_both_formats(fig, output_path_base, include_title_and_caption=True):
+    """Save figure in both PNG and SVG formats.
+    
+    Args:
+        fig: matplotlib figure object
+        output_path_base: base path without extension (e.g., 'figures/figure1_panel_a')
+        include_title_and_caption: if True, include title and caption (PNG), if False, plot only (SVG)
+    """
+    # Save PNG with titles and captions
+    png_path = output_path_base + '.png'
+    fig.savefig(png_path, format='png', dpi=600, bbox_inches='tight', 
+                facecolor='white', edgecolor='none', pad_inches=0.05)
+    
+    # For SVG, temporarily hide titles and text annotations if requested
+    if not include_title_and_caption:
+        # Store original title and text elements
+        original_suptitle = fig._suptitle
+        original_texts = []
+        
+        # Hide suptitle
+        if fig._suptitle:
+            fig._suptitle.set_visible(False)
+        
+        # Hide figure-level text annotations
+        for text in fig.texts:
+            if text != fig._suptitle:
+                original_texts.append((text, text.get_visible()))
+                text.set_visible(False)
+    
+    # Save SVG
+    svg_path = output_path_base + '.svg'
+    fig.savefig(svg_path, format='svg', bbox_inches='tight', 
+                facecolor='white', edgecolor='none', pad_inches=0.05)
+    
+    # Restore titles and text for PNG if they were hidden
+    if not include_title_and_caption:
+        # Restore suptitle
+        if original_suptitle:
+            original_suptitle.set_visible(True)
+        
+        # Restore figure-level texts
+        for text, was_visible in original_texts:
+            text.set_visible(was_visible)
+    
+    return png_path, svg_path
+
+
 COLORS = {
-    'ordered': '#FF7F50',
-    'noise': '#4682B4',
-    'neutral': '#708090',
-    'accent': '#D2691E',
+    # 按照figures.md规范的色系
+    'ordered': '#FF7F50',        # 珊瑚橙 - 有序光流/核心发现
+    'noise': '#4682B4',          # 钢青色 - 随机噪音/对照组  
+    'neutral': '#708090',        # 石板灰 - 中性/外围
+    'accent': '#D2691E',         # 赭石色 - 强调色
+    'hub': '#FF7F50',            # 枢纽神经元 - 珊瑚橙
+    'periphery': '#708090',      # 外围神经元 - 石板灰
+    'axis_color': '#666666',     # 坐标轴颜色
+    'grid_color': '#CCCCCC',     # 网格颜色
 }
 
 
@@ -213,7 +291,7 @@ def extract_trial_features(
 
     scaler = StandardScaler()
     X = scaler.fit_transform(X)
-    y = labels.astype(int)
+    y = np.array(labels).astype(int)
     return X, y
 
 
@@ -298,10 +376,11 @@ def fig1_panel_a(output_dir: str):
              fontsize=9)
 
     os.makedirs(output_dir, exist_ok=True)
-    out_path = os.path.join(output_dir, 'figure1_panel_a.png')
-    plt.savefig(out_path)
+    out_path_base = os.path.join(output_dir, 'figure1_panel_a')
+    png_path, svg_path = save_figure_both_formats(fig, out_path_base)
     plt.close(fig)
-    print(f'[Saved] {out_path}')
+    print(f'[Saved] {png_path}')
+    print(f'[Saved] {svg_path}')
 
 
 def _evaluate_session_overall_accuracy(segments: np.ndarray, labels: np.ndarray, rr_neurons: List[int]) -> dict:
@@ -468,7 +547,9 @@ def fig1_panel_b(output_dir: str, force_config: Optional[str] = None):
     ax.set_ylabel('Accuracy')
     ax.set_ylim(0.0, min(1.05, max(0.25, y2 + 0.08)))
     ax.legend(frameon=False, loc='lower right')
-    ax.grid(True, axis='y', alpha=0.3)
+    # 更精细的网格设置
+    ax.grid(True, axis='y', alpha=0.2, color=COLORS['grid_color'], linewidth=0.5)
+    ax.tick_params(colors=COLORS['axis_color'])
 
     title = 'Figure 1B. High-fidelity three-way decoding (with baseline)'
     subtitle = (
@@ -479,17 +560,90 @@ def fig1_panel_b(output_dir: str, force_config: Optional[str] = None):
     fig.suptitle(title, x=0.02, ha='left', fontweight='bold')
     fig.text(0.02, -0.02, subtitle, fontsize=9)
 
-    out_path = os.path.join(output_dir, 'figure1_panel_b.png')
-    plt.savefig(out_path)
+    out_path_base = os.path.join(output_dir, 'figure1_panel_b')
+    png_path, svg_path = save_figure_both_formats(fig, out_path_base)
     plt.close(fig)
-    print(f'[Saved] {out_path}')
+    print(f'[Saved] {png_path}')
+    print(f'[Saved] {svg_path}')
 
 
 def fig1_panel_c(output_dir: str, force_config: Optional[str] = None,
                  fi_log: Optional[bool] = None, fi_norm: str = 'none'):
-    """Accuracy vs number of neurons (and optional Fisher info).
+    """Generate both accuracy and Fisher info panels separately."""
+    fig1_panel_c_accuracy(output_dir, force_config)
+    fig1_panel_c_fisher(output_dir, force_config, fi_log, fi_norm)
+
+
+def fig1_panel_c_accuracy(output_dir: str, force_config: Optional[str] = None):
+    """Accuracy vs number of neurons only."""
+    setup_publication_style()
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Load one representative session
+    session_loaded = False
+    candidate_configs = [force_config] if force_config else list_config_files()
+    for cfg_path in candidate_configs:
+        if cfg_path is None:
+            continue
+        try:
+            segments, labels, neuron_pos, stimulus_data = load_session_from_config(cfg_path)
+            rr_neurons = compute_rr_neurons(segments, stimulus_data)
+            session_loaded = True
+            break
+        except Exception:
+            continue
+    if not session_loaded:
+        raise RuntimeError('No session could be loaded for panel C accuracy.')
+
+    rng = np.random.default_rng(42)
+    if len(rr_neurons) == 0:
+        rr_neurons = list(range(segments.shape[1]))
+
+    # Determine neuron counts with smaller steps for smoother curves
+    max_n = max(10, min(len(rr_neurons), 200))
+    counts = np.unique(np.linspace(5, max_n, num=12, dtype=int))
+
+    acc_means, acc_stds = [], []
+
+    for k in counts:
+        acc_trials = []
+        for b in range(8):
+            subset = rng.choice(rr_neurons, size=k, replace=False)
+            X, y = extract_trial_features(segments, labels, subset)
+            res = cross_val_performance(X, y)
+            acc_trials.append(res['overall_mean'])
+
+        acc_means.append(np.mean(acc_trials))
+        acc_stds.append(np.std(acc_trials))
+
+    fig, ax = plt.subplots(figsize=(7, 5))
+    ax.plot(counts, acc_means, color=COLORS['accent'], lw=2)
+    ax.fill_between(counts, np.array(acc_means) - np.array(acc_stds),
+                     np.array(acc_means) + np.array(acc_stds), color=COLORS['accent'], alpha=0.2)
+    ax.set_xlabel('Number of neurons used')
+    ax.set_ylabel('Decoding accuracy')
+    ax.set_ylim(0.0, 1.05)
+    ax.grid(True, axis='y', alpha=0.2, color=COLORS['grid_color'], linewidth=0.5)
+    ax.tick_params(colors=COLORS['axis_color'])
+
+    fig.suptitle('Figure 1C. Decoding accuracy vs neuron count', 
+                x=0.02, ha='left', fontweight='bold')
+    fig.text(0.02, -0.02,
+             'Decoding accuracy increases with neuron count using cross-validation.', 
+             fontsize=8, color='#666666')
+
+    out_path_base = os.path.join(output_dir, 'figure1_panel_c_accuracy')
+    png_path, svg_path = save_figure_both_formats(fig, out_path_base)
+    plt.close(fig)
+    print(f'[Saved] {png_path}')
+    print(f'[Saved] {svg_path}')
+
+
+def fig1_panel_c_fisher(output_dir: str, force_config: Optional[str] = None,
+                       fi_log: Optional[bool] = None, fi_norm: str = 'none'):
+    """Fisher information vs number of neurons.
     Display options:
-      - fi_log: bool, if True use log scale for FI axis; if None, uses default (True)
+      - fi_log: bool, if True use log scale for FI axis; if None, uses default (False)
       - fi_norm: 'none' | 'minmax' (display-only normalization)
     """
     setup_publication_style()
@@ -509,17 +663,16 @@ def fig1_panel_c(output_dir: str, force_config: Optional[str] = None,
         except Exception:
             continue
     if not session_loaded:
-        raise RuntimeError('No session could be loaded for panel C.')
+        raise RuntimeError('No session could be loaded for panel C Fisher.')
 
     rng = np.random.default_rng(42)
     if len(rr_neurons) == 0:
         rr_neurons = list(range(segments.shape[1]))
 
-    # Determine neuron counts (log/linear spacing)
+    # Determine neuron counts with smaller steps for smoother curves
     max_n = max(10, min(len(rr_neurons), 200))
-    counts = np.unique(np.linspace(5, max_n, num=8, dtype=int))
+    counts = np.unique(np.linspace(5, max_n, num=12, dtype=int))
 
-    acc_means, acc_stds = [], []
     fisher_means, fisher_stds = [], []
 
     # Use reclassified labels for FI consistency
@@ -529,45 +682,46 @@ def fig1_panel_c(output_dir: str, force_config: Optional[str] = None,
         labels_for_fi = labels
 
     for k in counts:
-        acc_trials = []
         fisher_trials = []
-        for b in range(5):
+        for b in range(8):
             subset = rng.choice(rr_neurons, size=k, replace=False)
-            X, y = extract_trial_features(segments, labels, subset)
-            res = cross_val_performance(X, y)
-            acc_trials.append(res['overall_mean'])
 
-            if calculate_fisher_information is not None:
-                try:
-                    # Average Fisher info over stimulus window
-                    fi = calculate_fisher_information(segments, labels_for_fi, subset)
-                    t0 = getattr(global_cfg, 'PRE_FRAMES', 10)
-                    t1 = t0 + getattr(global_cfg, 'STIMULUS_DURATION', 20)
-                    fi_win = np.mean(fi[t0:t1]) if fi.ndim == 1 else np.mean(fi)
-                    fisher_trials.append(float(fi_win))
-                except Exception:
-                    pass
+            # Use loaddata.py style Fisher calculation with fixed time window
+            try:
+                # Extract time window data (consistent with loaddata.py approach)
+                t0 = getattr(global_cfg, 'PRE_FRAMES', 10)
+                t1 = t0 + getattr(global_cfg, 'STIMULUS_DURATION', 20)
+                
+                # Filter valid trials and RR neurons
+                valid_mask = np.array(labels_for_fi) != 0
+                valid_segments_fi = segments[valid_mask][:, subset, :]
+                valid_labels_fi = np.array(labels_for_fi)[valid_mask]
+                
+                # Extract stimulus window
+                window_data = valid_segments_fi[:, :, t0:t1]
+                
+                # Calculate Fisher info using improved method with PCA-aware processing
+                fi_score = _calculate_fisher_window_with_pca(window_data, valid_labels_fi)
+                fisher_trials.append(float(fi_score))
+            except Exception as e:
+                # Fallback to original method if available
+                if calculate_fisher_information is not None:
+                    try:
+                        fi = calculate_fisher_information(segments, labels_for_fi, subset)
+                        fi_win = np.mean(fi[t0:t1]) if fi.ndim == 1 else np.mean(fi)
+                        fisher_trials.append(float(fi_win))
+                    except Exception:
+                        pass
 
-        acc_means.append(np.mean(acc_trials))
-        acc_stds.append(np.std(acc_trials))
         fisher_means.append(np.mean(fisher_trials) if fisher_trials else np.nan)
         fisher_stds.append(np.std(fisher_trials) if fisher_trials else np.nan)
 
-    fig, ax1 = plt.subplots(figsize=(8, 5.5))
-    ax1.plot(counts, acc_means, color=COLORS['accent'], lw=2)
-    ax1.fill_between(counts, np.array(acc_means) - np.array(acc_stds),
-                     np.array(acc_means) + np.array(acc_stds), color=COLORS['accent'], alpha=0.2)
-    ax1.set_xlabel('Number of neurons used')
-    ax1.set_ylabel('Decoding accuracy', color=COLORS['accent'])
-    ax1.set_ylim(0.0, 1.05)
-    ax1.grid(True, axis='y', alpha=0.3)
+    fig, ax = plt.subplots(figsize=(7, 5))
 
-    # Optional Fisher info on secondary axis (log scale and/or normalization)
+    # Process Fisher info data
     if not np.all(np.isnan(fisher_means)):
-        # Defaults: Panel C 用对数轴，除非显式关闭
-        use_log = True if fi_log is None else bool(fi_log)
-
-        ax2 = ax1.twinx()
+        use_log = False if fi_log is None else bool(fi_log)
+        
         fm = np.array(fisher_means, dtype=float)
         fs = np.array(fisher_stds, dtype=float)
         valid = ~np.isnan(fm)
@@ -576,44 +730,49 @@ def fig1_panel_c(output_dir: str, force_config: Optional[str] = None,
         lower = fm - fs
         upper = fm + fs
 
-        # Display normalization (min-max on band)
+        # Apply normalization
         label_suffix = ''
-        if fi_norm.lower() == 'minmax':
-            vmin = np.nanmin(lower)
-            vmax = np.nanmax(upper)
+        if fi_norm.lower() == 'minmax' and valid.any():
+            vmin = np.nanmin(lower[valid])
+            vmax = np.nanmax(upper[valid])
+            
             if np.isfinite(vmin) and np.isfinite(vmax) and vmax > vmin:
                 fm = (fm - vmin) / (vmax - vmin)
                 lower = (lower - vmin) / (vmax - vmin)
                 upper = (upper - vmin) / (vmax - vmin)
                 label_suffix = ' (normalized)'
-            else:
-                # Fallback: no normalization
-                pass
 
         # Positivity enforcement if using log
         if use_log:
             eps = 1e-8
             fm = np.where(fm <= 0, eps, fm)
             lower = np.where(lower <= 0, eps, lower)
-            # ensure upper >= lower
             upper = np.where(upper <= lower, lower * (1 + 1e-3), upper)
 
         # Plot
-        ax2.plot(counts[valid], fm[valid], color=COLORS['noise'], lw=2)
+        ax.plot(counts[valid], fm[valid], color=COLORS['noise'], lw=2)
         if valid.any():
-            ax2.fill_between(counts[valid], lower[valid], upper[valid], color=COLORS['noise'], alpha=0.2)
+            ax.fill_between(counts[valid], lower[valid], upper[valid], color=COLORS['noise'], alpha=0.2)
         if use_log:
-            ax2.set_yscale('log')
-        ax2.set_ylabel(f'Fisher information{label_suffix}', color=COLORS['noise'])
+            ax.set_yscale('log')
+        
+        ax.set_ylabel(f'Fisher information{label_suffix}', color=COLORS['noise'])
+    
+    ax.set_xlabel('Number of neurons used')
+    ax.grid(True, axis='y', alpha=0.2, color=COLORS['grid_color'], linewidth=0.5)
+    ax.tick_params(colors=COLORS['axis_color'])
 
-    fig.suptitle('Figure 1C. Distributed coding with increasing neuron count', x=0.02, ha='left', fontweight='bold')
+    fig.suptitle('Figure 1C. Fisher information vs neuron count', 
+                x=0.02, ha='left', fontweight='bold')
     fig.text(0.02, -0.02,
-             'Decoding accuracy (and Fisher information, if available) versus the number of neurons included.', fontsize=9)
+             'Fisher information changes with neuron count.', 
+             fontsize=8, color='#666666')
 
-    out_path = os.path.join(output_dir, 'figure1_panel_c.png')
-    plt.savefig(out_path)
+    out_path_base = os.path.join(output_dir, 'figure1_panel_c_fisher')
+    png_path, svg_path = save_figure_both_formats(fig, out_path_base)
     plt.close(fig)
-    print(f'[Saved] {out_path}')
+    print(f'[Saved] {png_path}')
+    print(f'[Saved] {svg_path}')
 
 
 def _timecourse_decoding_accuracy(
@@ -659,6 +818,250 @@ def _timecourse_decoding_accuracy(
     return mean_acc, sd_acc, timepoints
 
 
+def _calculate_fisher_window_with_pca(data: np.ndarray, labels: np.ndarray) -> float:
+    """
+    Calculate Fisher information for a time window with PCA-aware processing,
+    consistent with loaddata.py's calculate_fisher_information_window approach.
+    
+    Parameters:
+    data: Neural data (trials, neurons, timepoints)
+    labels: Label array
+    
+    Returns:
+    fisher_score: Multivariate Fisher information score
+    """
+    from scipy.linalg import pinv, eigvals
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.decomposition import PCA
+    
+    # Average over time dimension (consistent with loaddata.py)
+    mean_data = np.mean(data, axis=2)  # (trials, neurons)
+    
+    # Only use categories 1 and 2 for Fisher calculation, exclude category 3 (noise)
+    target_labels = [1, 2]
+    target_mask = np.isin(labels, target_labels)
+    
+    if np.sum(target_mask) < 10:  # Need at least 10 samples
+        return 0.0
+    
+    # Filter data and labels
+    filtered_data = mean_data[target_mask]
+    filtered_labels = labels[target_mask]
+    
+    unique_labels = np.unique(filtered_labels)
+    if len(unique_labels) < 2:
+        return 0.0
+    
+    n_trials, n_neurons = filtered_data.shape
+    n_classes = len(unique_labels)
+    
+    # Check sufficient samples per class
+    min_samples_per_class = min([np.sum(filtered_labels == label) for label in unique_labels])
+    if min_samples_per_class < 2:
+        return 0.0
+    
+    # Data standardization to avoid numerical issues
+    scaler = StandardScaler()
+    mean_data_scaled = scaler.fit_transform(filtered_data)
+    
+    # Key improvement: Use PCA when neuron count approaches or exceeds trial count
+    effective_dim = min(n_neurons, n_trials - n_classes - 1)
+    
+    # Use fixed PCA dimension to avoid jumps and maintain consistency
+    # Determine a safe fixed dimension for PCA that works across all neuron counts
+    safe_max_dim = max(2, min(n_trials - n_classes - 2, 15))  # Conservative safe maximum
+    
+    # Always apply PCA when neuron count exceeds safe dimension to maintain consistency
+    if n_neurons > safe_max_dim:
+        # Use FIXED target dimension - no variation
+        target_dim = safe_max_dim  # Fixed dimension, no changes
+        
+        # Execute PCA dimensionality reduction
+        pca = PCA(n_components=target_dim, random_state=42)
+        mean_data_scaled = pca.fit_transform(mean_data_scaled)
+        
+        # Update dimension info
+        n_neurons = target_dim
+    
+    # Now calculate multivariate Fisher information on (potentially) reduced data
+    
+    # Calculate grand mean
+    grand_mean = np.mean(mean_data_scaled, axis=0)  # (n_neurons,)
+    
+    # Calculate class means and sizes
+    class_means = []
+    class_sizes = []
+    
+    for label in unique_labels:
+        label_mask = filtered_labels == label
+        label_data = mean_data_scaled[label_mask]
+        if len(label_data) > 0:
+            class_means.append(np.mean(label_data, axis=0))
+            class_sizes.append(len(label_data))
+        else:
+            class_means.append(grand_mean)
+            class_sizes.append(0)
+    
+    class_means = np.array(class_means)  # (n_classes, n_neurons)
+    class_sizes = np.array(class_sizes)
+    
+    # Calculate between-class scatter matrix (S_b)
+    S_b = np.zeros((n_neurons, n_neurons), dtype=np.float64)
+    for i, (class_mean, n_i) in enumerate(zip(class_means, class_sizes)):
+        if n_i > 0:
+            diff = (class_mean - grand_mean).reshape(-1, 1).astype(np.float64)
+            S_b += n_i * np.dot(diff, diff.T).astype(np.float64)
+    
+    # Calculate within-class scatter matrix (S_w)
+    S_w = np.zeros((n_neurons, n_neurons), dtype=np.float64)
+    for label in unique_labels:
+        label_mask = filtered_labels == label
+        label_data = mean_data_scaled[label_mask]
+        if len(label_data) > 1:  # Need at least 2 samples for covariance
+            class_mean = np.mean(label_data, axis=0).astype(np.float64)
+            centered_data = (label_data - class_mean).astype(np.float64)
+            S_w += np.dot(centered_data.T, centered_data).astype(np.float64)
+    
+    # Adaptive regularization: based on data scale and condition number
+    # Calculate S_w condition number to determine regularization strength
+    try:
+        eigenvals = eigvals(S_w).real.astype(np.float64)  # Ensure real and float64
+        eigenvals = eigenvals[eigenvals > 0]  # Only consider positive eigenvalues
+        if len(eigenvals) > 1:
+            condition_number = float(np.max(eigenvals) / np.min(eigenvals))
+            # Adaptively adjust regularization based on condition number
+            reg_strength = max(1e-6, float(np.max(eigenvals)) * 1e-10 * condition_number)
+        else:
+            reg_strength = 1e-3
+    except:
+        reg_strength = 1e-3
+    
+    regularization = (reg_strength * np.eye(n_neurons)).astype(np.float64)
+    S_w += regularization
+    
+    try:
+        # Use more stable method to calculate multivariate Fisher information
+        # Method 1: Direct calculation of trace(S_w^(-1) * S_b)
+        S_w_inv = pinv(S_w).astype(np.float64)
+        fisher_matrix = np.dot(S_w_inv, S_b).astype(np.float64)
+        fisher_score = float(np.trace(fisher_matrix).real)  # Ensure real
+        
+        # Numerical stability check
+        if np.isnan(fisher_score) or np.isinf(fisher_score) or fisher_score < 0:
+            # Method 2: Use generalized eigenvalue problem
+            from scipy.linalg import eigh
+            try:
+                eigenvals, _ = eigh(S_b, S_w)
+                eigenvals_real = eigenvals.real.astype(np.float64)
+                fisher_score = float(np.sum(eigenvals_real[eigenvals_real > 0]))
+            except:
+                # Method 3: Simplified multivariate Fisher ratio
+                trace_s_b = float(np.trace(S_b).real)
+                trace_s_w = float(np.trace(S_w).real)
+                fisher_score = trace_s_b / (trace_s_w + 1e-10)
+        
+        # Ensure non-negative finite value
+        fisher_score = max(0.0, float(fisher_score))
+        if not np.isfinite(fisher_score):
+            fisher_score = 0.0
+        
+    except Exception as e:
+        # Final fallback: use simplified version
+        try:
+            trace_s_b = float(np.trace(S_b).real)
+            trace_s_w = float(np.trace(S_w).real)
+            fisher_score = trace_s_b / (trace_s_w + 1e-10)
+            fisher_score = max(0.0, float(fisher_score))
+        except:
+            fisher_score = 0.0
+    
+    return fisher_score
+
+
+def _calculate_multivariate_fisher_single_timepoint(data: np.ndarray, labels: np.ndarray) -> float:
+    """
+    Calculate single timepoint multivariate Fisher information using robust scatter matrix method
+    from loaddata.py implementation.
+    
+    Parameters:
+    data: Neural data (trials, neurons)  
+    labels: Label array
+    
+    Returns:
+    fisher_score: Multivariate Fisher information score
+    """
+    from scipy.linalg import pinv
+    
+    unique_labels = np.unique(labels)
+    if len(unique_labels) < 2:
+        return 0.0
+    
+    n_trials, n_neurons = data.shape
+    n_classes = len(unique_labels)
+    
+    # Check if there are enough samples
+    min_samples_per_class = min([np.sum(labels == label) for label in unique_labels])
+    if min_samples_per_class < 2:
+        return 0.0
+    
+    # Calculate grand mean
+    grand_mean = np.mean(data, axis=0)  # (n_neurons,)
+    
+    # Calculate class means and sizes
+    class_means = []
+    class_sizes = []
+    
+    for label in unique_labels:
+        label_mask = labels == label
+        label_data = data[label_mask]
+        if len(label_data) > 0:
+            class_means.append(np.mean(label_data, axis=0))
+            class_sizes.append(len(label_data))
+        else:
+            class_means.append(grand_mean)
+            class_sizes.append(0)
+    
+    class_means = np.array(class_means)  # (n_classes, n_neurons)
+    class_sizes = np.array(class_sizes)
+    
+    # Calculate between-class scatter matrix (S_b)
+    S_b = np.zeros((n_neurons, n_neurons), dtype=np.float64)
+    for i, (class_mean, n_i) in enumerate(zip(class_means, class_sizes)):
+        if n_i > 0:
+            diff = (class_mean - grand_mean).reshape(-1, 1).astype(np.float64)
+            S_b += n_i * np.dot(diff, diff.T).astype(np.float64)
+    
+    # Calculate within-class scatter matrix (S_w)
+    S_w = np.zeros((n_neurons, n_neurons), dtype=np.float64)
+    for label in unique_labels:
+        label_mask = labels == label
+        label_data = data[label_mask]
+        if len(label_data) > 1:  # Need at least 2 samples for covariance
+            class_mean = np.mean(label_data, axis=0).astype(np.float64)
+            centered_data = (label_data - class_mean).astype(np.float64)
+            S_w += np.dot(centered_data.T, centered_data).astype(np.float64)
+    
+    # Add regularization to avoid singular matrix
+    regularization = 1e-6 * np.eye(n_neurons, dtype=np.float64)
+    S_w += regularization
+    
+    try:
+        # Calculate multivariate Fisher discriminant ratio: trace(S_w^(-1) * S_b)
+        S_w_inv = pinv(S_w)
+        fisher_matrix = np.dot(S_w_inv, S_b)
+        
+        # Fisher information is the trace of the matrix
+        fisher_score = np.trace(fisher_matrix)
+        
+        # Ensure non-negative value
+        fisher_score = max(0.0, fisher_score)
+        
+    except Exception as e:
+        fisher_score = 0.0
+    
+    return fisher_score
+
+
 def _timecourse_fisher(
     segments: np.ndarray,
     labels: np.ndarray,
@@ -666,12 +1069,12 @@ def _timecourse_fisher(
     repeats: int = 10,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Compute per-timepoint Fisher info with bootstrap over trials for SEM.
+    Uses robust multivariate Fisher calculation from loaddata.py.
     Returns (mean_fi[T], sem_fi[T]) normalized per neuron.
     """
     T = segments.shape[2]
     if calculate_fisher_information is None:
-        # Fallback simple Fisher-like score: between/within variance ratio on projections
-        # Here we compute per timepoint the ratio of between-class variance of means to within-class variance.
+        # Use our robust multivariate Fisher implementation
         rng = np.random.default_rng(42)
         fi_mat = []
         for r in range(repeats):
@@ -681,26 +1084,11 @@ def _timecourse_fisher(
             lab_b = labels[idx]
             fi_t = []
             for t in range(T):
-                X_t = seg_b[:, :, t]
-                # project to first PC to stabilize
+                X_t = seg_b[:, :, t]  # (trials, neurons)
+                # Standardize data for numerical stability
                 X_t = StandardScaler().fit_transform(X_t)
-                # per-class means
-                classes = np.unique(lab_b)
-                means = []
-                within_vars = []
-                for c in classes:
-                    Xc = X_t[lab_b == c]
-                    if len(Xc) == 0:
-                        continue
-                    means.append(Xc.mean(axis=0))
-                    within_vars.append(Xc.var(axis=0).mean())
-                if len(means) >= 2:
-                    means = np.stack(means)
-                    between = np.var(means, axis=0).mean()
-                    within = np.mean(within_vars) + 1e-8
-                    fi_val = (between / within)
-                else:
-                    fi_val = 0.0
+                # Use robust multivariate Fisher calculation
+                fi_val = _calculate_multivariate_fisher_single_timepoint(X_t, lab_b)
                 fi_t.append(fi_val)
             fi_mat.append(fi_t)
         fi_mat = np.array(fi_mat)
@@ -708,6 +1096,7 @@ def _timecourse_fisher(
         sem_fi = fi_mat.std(axis=0, ddof=1) / np.sqrt(repeats)
         return mean_fi, sem_fi
     else:
+        # Use project's calculate_fisher_information if available
         rng = np.random.default_rng(43)
         fi_mat = []
         for r in range(repeats):
@@ -814,10 +1203,11 @@ def fig1_panel_b_timecourse(output_dir: str, force_config: Optional[str] = None,
     # Save into figures/supp for supplemental
     supp_dir = os.path.join(output_dir, 'supp')
     os.makedirs(supp_dir, exist_ok=True)
-    out_path = os.path.join(supp_dir, 'figure1_panel_b_timecourse.png')
-    plt.savefig(out_path)
+    out_path_base = os.path.join(supp_dir, 'figure1_panel_b_timecourse')
+    png_path, svg_path = save_figure_both_formats(fig, out_path_base)
     plt.close(fig)
-    print(f'[Saved] {out_path}')
+    print(f'[Saved] {png_path}')
+    print(f'[Saved] {svg_path}')
 
 
 def fig1_panel_d(output_dir: str, force_config: Optional[str] = None):
@@ -872,10 +1262,153 @@ def fig1_panel_d(output_dir: str, force_config: Optional[str] = None):
     fig.suptitle('Figure 1D. Neural manifold separability (t-SNE)', x=0.02, ha='left', fontweight='bold')
     fig.text(0.02, -0.02, '2D t-SNE of trial features (RR neurons, stimulus window), colored by stimulus category.', fontsize=9)
 
-    out_path = os.path.join(output_dir, 'figure1_panel_d.png')
-    plt.savefig(out_path)
+    out_path_base = os.path.join(output_dir, 'figure1_panel_d')
+    png_path, svg_path = save_figure_both_formats(fig, out_path_base)
     plt.close(fig)
-    print(f'[Saved] {out_path}')
+    print(f'[Saved] {png_path}')
+    print(f'[Saved] {svg_path}')
+
+
+def fig1_panel_fisher_conditions(output_dir: str, force_config: Optional[str] = None):
+    """Fisher information comparison across different condition pairs."""
+    if calculate_fisher_information_by_condition is None:
+        raise RuntimeError('Fisher information by condition calculation not available.')
+    
+    setup_publication_style()
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Use M65 if no specific config provided
+    if force_config is None:
+        force_config = get_config_by_mouse('m65')
+    
+    if force_config is None or not os.path.exists(force_config):
+        raise RuntimeError('M65 config not found.')
+
+    # Load single session with M65 fix using fast_rr_selection
+    try:
+        print(f"\nLoading: {force_config}")
+        segments, labels, neuron_pos, stimulus_data = load_session_from_config(force_config)
+        print(f"Successfully loaded data: {segments.shape[0]} trials, {segments.shape[1]} neurons")
+        
+        # Use fast_rr_selection to recompute RR neurons for M65 (fix from loaddata.py)
+        try:
+            rr_labels = reclassify_labels(stimulus_data)
+        except Exception:
+            rr_labels = stimulus_data[:, 0].astype(int)
+        
+        rr_results = fast_rr_selection(segments, rr_labels)
+        rr_neurons = list(rr_results.get('rr_neurons', []))
+        print(f"RR neurons found: {len(rr_neurons)}")
+        
+        # Use original labels to preserve all categories (1, 2, 3)
+        fisher_labels = labels
+        print(f"Using original labels distribution: {np.unique(fisher_labels, return_counts=True)}")
+
+        # Calculate Fisher information by condition
+        condition_fisher_scores = calculate_fisher_information_by_condition(segments, fisher_labels, rr_neurons)
+        print(f"Fisher conditions calculated: {list(condition_fisher_scores.keys())}")
+        
+    except Exception as e:
+        print(f"Failed to load {force_config}: {e}")
+        import traceback
+        traceback.print_exc()
+        raise RuntimeError('Failed to load session for Fisher conditions panel.')
+
+    # Define condition mapping with all four comparisons
+    condition_mapping = {
+        'condition_1_vs_2': ('Contraction vs Expansion', COLORS['ordered']),
+        'condition_1_vs_3': ('Contraction vs Random', COLORS['accent']), 
+        'condition_2_vs_3': ('Expansion vs Random', COLORS['noise']),
+        'all_conditions': ('All Conditions', COLORS['neutral'])
+    }
+
+    # Calculate statistics for each condition
+    condition_stats = {}
+    
+    for condition_key in condition_mapping.keys():
+        if condition_key in condition_fisher_scores:
+            fisher_scores = condition_fisher_scores[condition_key]
+            fisher_values = fisher_scores.flatten()
+            condition_stats[condition_key] = {
+                'mean': np.mean(fisher_values),
+                'sem': np.std(fisher_values) / np.sqrt(len(fisher_values)),  # Standard error
+                'count': len(fisher_values)
+            }
+
+    # Create the plot
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    # Prepare data for plotting
+    condition_names = []
+    means = []
+    sems = []
+    bar_colors = []
+
+    for condition_key, (condition_name, color) in condition_mapping.items():
+        if condition_key in condition_stats:
+            condition_names.append(condition_name)
+            means.append(condition_stats[condition_key]['mean'])
+            sems.append(condition_stats[condition_key]['sem'])
+            bar_colors.append(color)
+
+    # Create bars with standard error bars (no scatter plots)
+    x_positions = np.arange(len(condition_names))
+    bars = ax.bar(x_positions, means, yerr=sems,
+                  capsize=4, color=bar_colors, alpha=0.8, edgecolor='white', linewidth=1.0)
+
+    # Add significance markers
+    # Simple significance test: compare each condition vs baseline (lowest mean)
+    baseline_mean = min(means)
+    y_max = max(np.array(means) + np.array(sems))
+    
+    for i, (mean_val, sem_val) in enumerate(zip(means, sems)):
+        # Simple criterion: mean > baseline + 2*sem
+        if mean_val > baseline_mean + 2 * sem_val:
+            significance = '**'
+        elif mean_val > baseline_mean + sem_val:
+            significance = '*'
+        else:
+            significance = ''
+        
+        if significance:
+            ax.text(x_positions[i], mean_val + sem_val + y_max * 0.02,
+                   significance, ha='center', va='bottom', 
+                   fontweight='bold', fontsize=12)
+
+    # Set labels and styling
+    ax.set_xticks(x_positions)
+    ax.set_xticklabels(condition_names, rotation=15, ha='right')
+    ax.set_ylabel('Fisher Information')
+    ax.set_ylim(0, y_max * 1.15)
+    
+    # Apply figure_maker styling
+    ax.grid(True, axis='y', alpha=0.2, color=COLORS['grid_color'], linewidth=0.5)
+    ax.tick_params(colors=COLORS['axis_color'])
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+
+    # Title and caption
+    mouse_name = os.path.basename(force_config).replace('.json', '').upper()
+    fig.suptitle('Figure 1E. Fisher Information by Condition Pairs', 
+                x=0.02, ha='left', fontweight='bold')
+    fig.text(0.02, -0.02, 
+             f'Fisher information for {mouse_name}. Error bars show standard error.', 
+             fontsize=9, color='#666666')
+
+    # Save figure
+    out_path_base = os.path.join(output_dir, 'figure1_panel_fisher_conditions')
+    png_path, svg_path = save_figure_both_formats(fig, out_path_base)
+    plt.close(fig)
+    print(f'[Saved] {png_path}')
+    print(f'[Saved] {svg_path}')
+    
+    # Print summary statistics
+    print(f"\n=== Fisher Information Comparison Summary ===")
+    for condition_key, (condition_name, _) in condition_mapping.items():
+        if condition_key in condition_stats:
+            stats = condition_stats[condition_key]
+            print(f"{condition_name}: {stats['mean']:.3f} ± {stats['sem']:.3f} (SEM, n={stats['count']})")
+    print(f"Mouse: {mouse_name}")
 
 
 # ---------------------------
@@ -913,8 +1446,10 @@ def main():
             fig1_panel_c(args.outdir, force_config=forced_cfg, fi_log=args.fi_log, fi_norm=args.fi_norm)
         elif panel == 'D':
             fig1_panel_d(args.outdir, force_config=forced_cfg)
+        elif panel in ('E', 'FISHER', 'FISHER_CONDITIONS'):
+            fig1_panel_fisher_conditions(args.outdir, force_config=forced_cfg)
         else:
-            raise ValueError('Unsupported panel for Figure 1. Use A/B/C/D.')
+            raise ValueError('Unsupported panel for Figure 1. Use A/B/C/D/E.')
     else:
         raise ValueError('Only Figure 1 is implemented currently.')
 

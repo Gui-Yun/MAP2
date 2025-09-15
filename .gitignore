@@ -3,3 +3,5 @@ cebra_results/
 results/
 __pycache__/
 *.pyc   
+CLAUDE.md
+figures/

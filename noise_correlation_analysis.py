@@ -391,6 +391,141 @@ def compare_noise_signal_correlations(noise_correlations, signal_correlations):
     return comparison_results
 
 
+# ========== New scientific figure helpers (non-destructive) ==========
+def visualize_noise_signal_scatter_scientific(comparison_results, save_dir=None):
+    """Render per-condition scatter-density plots of noise vs signal correlations.
+    Saves images to figures/ by default.
+    """
+    setup_noise_plot_style()
+    if save_dir is None:
+        try:
+            save_dir = cfg.get_figures_dir()
+        except Exception:
+            save_dir = 'figures'
+    os.makedirs(save_dir, exist_ok=True)
+
+    for condition, res in comparison_results.items():
+        noise_vals = np.asarray(res['noise_values'])
+        signal_vals = np.asarray(res['signal_values'])
+        r = res.get('correlation', np.nan)
+        p = res.get('p_value', np.nan)
+        n = noise_vals.size
+
+        fig, ax = plt.subplots(figsize=(6.5, 5.5))
+        hb = ax.hexbin(noise_vals, signal_vals, gridsize=60, cmap='Blues', bins='log', mincnt=1)
+        cbar = fig.colorbar(hb, ax=ax)
+        cbar.set_label('Count')
+
+        lim = (-1.0, 1.0)
+        ax.plot(lim, lim, linestyle=':', color='gray', linewidth=1.2)
+        try:
+            z = np.polyfit(noise_vals, signal_vals, 1)
+            xx = np.linspace(*lim, 100)
+            ax.plot(xx, z[0]*xx + z[1], color='red', linestyle='--', linewidth=1.5)
+        except Exception:
+            pass
+
+        ax.text(0.03, 0.97, f"r = {r:.3f}\np = {p:.1e}\nn = {n}", transform=ax.transAxes,
+                va='top', ha='left', bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.85, edgecolor='#cccccc'))
+        ax.set_xlim(lim); ax.set_ylim(lim)
+        ax.set_xlabel('Noise Correlation'); ax.set_ylabel('Signal Correlation')
+        ax.set_title(f'Noise vs Signal Correlation — Condition {condition}', loc='left', fontweight='bold')
+        out_path = os.path.join(save_dir, f'noise_signal_scatter_condition_{condition}.png')
+        plt.savefig(out_path, dpi=ncfg.DPI, bbox_inches='tight')
+        plt.close(fig)
+
+
+def visualize_hub_peripheral_scientific(hub_analysis, save_dir=None):
+    """Render standalone scientific figures for hub-peripheral analyses."""
+    setup_noise_plot_style()
+    if save_dir is None:
+        try:
+            save_dir = cfg.get_figures_dir()
+        except Exception:
+            save_dir = 'figures'
+    os.makedirs(save_dir, exist_ok=True)
+
+    conditions = list(hub_analysis.keys())
+    if not conditions:
+        return
+
+    # Counts
+    x = np.arange(len(conditions))
+    hub_counts = [hub_analysis[c]['n_hubs'] for c in conditions]
+    per_counts = [hub_analysis[c]['n_peripheral'] for c in conditions]
+    fig, ax = plt.subplots(figsize=(6.8, 4.8))
+    w = 0.38
+    ax.bar(x - w/2, hub_counts, width=w, color=ncfg.COLORS['hub'], edgecolor='black', linewidth=1.1, alpha=0.9, label='Hub')
+    ax.bar(x + w/2, per_counts, width=w, color=ncfg.COLORS['peripheral'], edgecolor='black', linewidth=1.1, alpha=0.9, label='Peripheral')
+    ax.set_xlabel('Condition'); ax.set_ylabel('Number of Neurons'); ax.set_xticks(x); ax.set_xticklabels(conditions)
+    ax.set_title('Hub vs Peripheral Counts', loc='left', fontweight='bold'); ax.legend(frameon=False); ax.grid(True, axis='y', alpha=0.3)
+    plt.savefig(os.path.join(save_dir, 'hp_counts.png'), dpi=ncfg.DPI, bbox_inches='tight'); plt.close(fig)
+
+    # Internal vs Cross-Type bars
+    hh_mu = [hub_analysis[c]['hub_hub_correlation']['mean'] for c in conditions]
+    pp_mu = [hub_analysis[c]['peripheral_peripheral_correlation']['mean'] for c in conditions]
+    hp_mu = [hub_analysis[c]['hub_peripheral_correlation']['mean'] for c in conditions]
+    hh_sd = [hub_analysis[c]['hub_hub_correlation']['std'] for c in conditions]
+    pp_sd = [hub_analysis[c]['peripheral_peripheral_correlation']['std'] for c in conditions]
+    hp_sd = [hub_analysis[c]['hub_peripheral_correlation']['std'] for c in conditions]
+    fig, ax = plt.subplots(figsize=(7.2, 4.8))
+    w = 0.25
+    ax.bar(x - w, hh_mu, yerr=hh_sd, width=w, color=ncfg.COLORS['hub'], edgecolor='black', linewidth=1.1, alpha=0.9, capsize=5, label='Hub-Hub')
+    ax.bar(x, pp_mu, yerr=pp_sd, width=w, color=ncfg.COLORS['peripheral'], edgecolor='black', linewidth=1.1, alpha=0.9, capsize=5, label='Per-Per')
+    ax.bar(x + w, hp_mu, yerr=hp_sd, width=w, color=ncfg.COLORS['neutral'], edgecolor='black', linewidth=1.1, alpha=0.9, capsize=5, label='Hub-Per')
+    ax.set_xlabel('Condition'); ax.set_ylabel('Noise Correlation'); ax.set_xticks(x); ax.set_xticklabels(conditions)
+    ax.set_title('Internal vs Cross-Type Correlations', loc='left', fontweight='bold'); ax.legend(frameon=False); ax.grid(True, axis='y', alpha=0.3)
+    plt.savefig(os.path.join(save_dir, 'hp_internal_cross_bars.png'), dpi=ncfg.DPI, bbox_inches='tight'); plt.close(fig)
+
+    # Significance (-log10 p)
+    pvals = [hub_analysis[c]['statistics']['hub_vs_peripheral_internal']['p_value'] for c in conditions]
+    yvals = [-np.log10((p if np.isfinite(p) and p>0 else 1.0)) for p in pvals]
+    fig, ax = plt.subplots(figsize=(6.8, 4.8))
+    bars = ax.bar(x, yvals, color=ncfg.COLORS['accent'], edgecolor='black', linewidth=1.1, alpha=0.95)
+    ax.axhline(-np.log10(0.05), linestyle='--', color='red', linewidth=1.2, label='p=0.05')
+    for i, b in enumerate(bars):
+        ax.text(b.get_x()+b.get_width()/2, b.get_height()+0.05, f"{pvals[i]:.1e}", ha='center', va='bottom', fontsize=9)
+    ax.set_xlabel('Condition'); ax.set_ylabel('-log10 p'); ax.set_xticks(x); ax.set_xticklabels(conditions)
+    ax.set_title('Statistical Significance (Hub vs Peripheral Internal)', loc='left', fontweight='bold'); ax.legend(frameon=False); ax.grid(True, axis='y', alpha=0.3)
+    plt.savefig(os.path.join(save_dir, 'hp_significance.png'), dpi=ncfg.DPI, bbox_inches='tight'); plt.close(fig)
+
+
+
+# Convenience wrappers to render new figures from saved analysis artifacts
+def render_scientific_noise_signal_from_saved(noise_npz_path=None, signal_npz_path=None, out_dir=None):
+    """Load saved correlation matrices and render scientific per-condition scatter plots.
+    Expects files created by run_noise_correlation_analysis().
+    """
+    if noise_npz_path is None:
+        noise_npz_path = os.path.join(ncfg.get_results_dir(), 'noise_correlation_matrices.npz')
+    if signal_npz_path is None:
+        signal_npz_path = os.path.join(ncfg.get_results_dir(), 'signal_correlation_matrices.npz')
+    noise = np.load(noise_npz_path)
+    signal = np.load(signal_npz_path)
+    noise_corr = {int(k.split('_')[-1]): noise[k] for k in noise.files}
+    signal_corr = {int(k.split('_')[-1]): signal[k] for k in signal.files}
+    cmp = compare_noise_signal_correlations(noise_corr, signal_corr)
+    visualize_noise_signal_scatter_scientific(cmp, save_dir=(out_dir or cfg.get_figures_dir()))
+
+
+def render_scientific_hub_peripheral_from_saved(corr_npz_path=None, out_dir=None):
+    """Load saved noise correlation matrices and rebuild networks to render hub-peripheral figures.
+    Uses build_networks_from_correlations() and analyze_hub_peripheral_noise_correlation().
+    """
+    if corr_npz_path is None:
+        corr_npz_path = os.path.join(ncfg.get_results_dir(), 'noise_correlation_matrices.npz')
+    data = np.load(corr_npz_path)
+    noise_corr = {int(k.split('_')[-1]): data[k] for k in data.files}
+    # Rebuild networks with current config
+    nets = build_networks_from_correlations(
+        noise_corr,
+        method=ncfg.NETWORK_METHOD,
+        threshold=ncfg.NETWORK_THRESHOLD,
+        density=ncfg.NETWORK_DENSITY
+    )
+    hubs = analyze_hub_peripheral_noise_correlation(noise_corr, nets)
+    visualize_hub_peripheral_scientific(hubs, save_dir=(out_dir or cfg.get_figures_dir()))
+
 def calculate_fisher_information_stimulus_window(segments, labels, rr_neurons, 
                                                start_time=None, end_time=None):
     """
@@ -1828,6 +1963,11 @@ if __name__ == "__main__":
     
     # 运行分析
     results = run_noise_correlation_analysis()
+    # 定义结果目录用于下方打印
+    try:
+        results_dir = ncfg.get_results_dir()
+    except Exception:
+        results_dir = 'results/noise_correlation'
     
     print("\n专业科研风格噪音相关性分析完成！")
     print("主要结果文件:")

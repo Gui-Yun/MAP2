@@ -334,22 +334,27 @@ def calculate_multivariate_fisher_per_level(segments, labels, neuron_indices):
     
     # 检查样本数是否足够
     min_samples_per_class = min([np.sum(valid_labels == label) for label in unique_labels])
-    if min_samples_per_class < 2 or n_trials < n_neurons + len(unique_labels):
+    if min_samples_per_class < 2:
         return 0.0
+    
+    # 检查是否需要PCA降维（移除过严格的条件检查）
+    print(f"多变量Fisher信息: {n_trials}个试次, {n_neurons}个神经元, {len(unique_labels)}个类别")
     
     # 数据标准化
     from sklearn.preprocessing import StandardScaler
     scaler = StandardScaler()
     neuron_data_scaled = scaler.fit_transform(neuron_data)
     
-    # 如果神经元数量过多，使用PCA降维
+    # 如果神经元数量过多，使用PCA降维（参考loaddata.py）
     if n_neurons > n_trials * 0.5:
         from sklearn.decomposition import PCA
-        target_dim = max(2, min(10, n_trials // 3))
+        target_dim = max(2, min(15, n_trials // 3))  # 与loaddata.py一致
+        print(f"使用PCA降维: {n_neurons}维 -> {target_dim}维 (试次数: {n_trials})")
+        
         pca = PCA(n_components=target_dim, random_state=42)
         neuron_data_scaled = pca.fit_transform(neuron_data_scaled)
         n_neurons = target_dim
-        print(f"PCA降维: {len(neuron_indices)}维 -> {target_dim}维")
+        print(f"PCA解释方差比: {np.sum(pca.explained_variance_ratio_):.3f}")
     
     # 计算总体均值
     grand_mean = np.mean(neuron_data_scaled, axis=0)
@@ -1093,6 +1098,175 @@ def visualize_centrality_vs_multivariate_fisher(segments, labels, centrality_nam
         'level_individual_fishers': level_individual_fishers,
         'level_neuron_counts': level_neuron_counts
     }
+
+
+# %% 轻量包装函数（仅可视化，不做额外分析）
+def export_multivariate_fisher_panel(segments, labels, centrality_scores,
+                                    n_levels=ccfg.N_LEVELS,
+                                    save_dir=None, filename='degree_multivariate_fisher_panel.png'):
+    """
+    仅基于给定的中心性分数，生成“多变量Fisher信息 2x2 面板”到 figures 目录。
+    不做任何新的分析逻辑，只使用已有的分层与可视化函数。
+    
+    参数:
+    - segments: (trials, neurons, timepoints)
+    - labels:  标签数组
+    - centrality_scores: dict(node -> score) 已计算好的中心性（建议为度中心性）
+    - n_levels: 分层数量
+    - save_dir: 保存目录；默认使用 cfg.get_figures_dir()
+    - filename: 输出文件名
+    """
+    if save_dir is None:
+        save_dir = cfg.get_figures_dir()
+    os.makedirs(save_dir, exist_ok=True)
+    level_groups, _ = stratify_neurons_by_centrality(centrality_scores, n_levels)
+    save_path = os.path.join(save_dir, filename)
+    visualize_centrality_vs_multivariate_fisher(
+        segments, labels, 'degree', level_groups, centrality_scores, save_path=save_path
+    )
+    return save_path
+
+
+def export_multivariate_fisher_panel_from_graph(segments, labels, G,
+                                                centrality_name='degree', n_levels=ccfg.N_LEVELS,
+                                                save_dir=None, filename=None):
+    """
+    便捷函数：从已给定的图 G 计算中心性，再导出面板图。
+    仍然不新增分析，仅复用已有函数。
+    """
+    if save_dir is None:
+        save_dir = cfg.get_figures_dir()
+    os.makedirs(save_dir, exist_ok=True)
+    if filename is None:
+        filename = f'{centrality_name}_multivariate_fisher_panel.png'
+    centrality_dict = calculate_centrality_metrics(G)
+    centrality_scores = centrality_dict.get(centrality_name, next(iter(centrality_dict.values())))
+    level_groups, _ = stratify_neurons_by_centrality(centrality_scores, n_levels)
+    save_path = os.path.join(save_dir, filename)
+    visualize_centrality_vs_multivariate_fisher(
+        segments, labels, centrality_name, level_groups, centrality_scores, save_path=save_path
+    )
+    return save_path
+
+
+# %% 导出“左侧两张子图”——分别单图输出（科研风格+更好配色）
+def export_left_panels(segments, labels, centrality_scores, n_levels=ccfg.N_LEVELS,
+                       save_dir=None, filename_left_top='panel_left_top.png', filename_left_bottom='panel_left_bottom.png'):
+    """
+    仅导出原2×2面板中的左上（中心性level均值 vs 多变量FI散点+回归）和左下（各level多变量FI柱状）两张子图，分别为独立图片。
+    """
+    if save_dir is None:
+        save_dir = cfg.get_figures_dir()
+    os.makedirs(save_dir, exist_ok=True)
+    setup_centrality_plot_style()
+
+    # 分层
+    level_groups, _ = stratify_neurons_by_centrality(centrality_scores, n_levels)
+
+    # 计算每层数据
+    level_names = []
+    level_centralities = []
+    level_multivariate_fishers = []
+    level_neuron_counts = []
+
+    for level_idx, group in enumerate(level_groups):
+        if len(group) == 0:
+            continue
+        level_names.append(f"Level {level_idx + 1}")
+        level_neuron_counts.append(len(group))
+        group_centrality = [centrality_scores[n] for n in group]
+        level_centralities.append(np.mean(group_centrality))
+        mv_fi = calculate_multivariate_fisher_per_level(segments, labels, group)
+        level_multivariate_fishers.append(mv_fi)
+
+    # 左上图：中心性均值 vs 多变量FI（带回归）
+    fig1, ax1 = plt.subplots(figsize=(7.5, 5.5))
+    scatter = ax1.scatter(level_centralities, level_multivariate_fishers,
+                         s=(np.array(level_neuron_counts) * 4),
+                         c=np.linspace(0, 1, len(level_centralities)), cmap='viridis',
+                         alpha=0.9, edgecolors='white', linewidth=1.5)
+    if len(level_centralities) > 2:
+        from scipy.stats import linregress
+        slope, intercept, r_value, p_value, _ = linregress(level_centralities, level_multivariate_fishers)
+        x_line = np.linspace(min(level_centralities), max(level_centralities), 100)
+        y_line = slope * x_line + intercept
+        ax1.plot(x_line, y_line, '--', color='#E74C3C', linewidth=2.8, alpha=0.9)
+        ax1.text(0.02, 0.98, f'r = {r_value:.3f}, p = {p_value:.3f}', transform=ax1.transAxes,
+                 ha='left', va='top', fontsize=12, fontweight='bold',
+                 bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.85))
+    ax1.set_xlabel('Degree Centrality (level mean)')
+    ax1.set_ylabel('Multivariate Fisher Information')
+    ax1.set_title('Centrality vs Multivariate Fisher Information (Levels)')
+    ax1.grid(True, alpha=0.35)
+    ax1.spines['top'].set_visible(False)
+    ax1.spines['right'].set_visible(False)
+    cbar = plt.colorbar(scatter, ax=ax1, shrink=0.85)
+    cbar.set_label('Level index (low→high)')
+    plt.tight_layout()
+    path1 = os.path.join(save_dir, filename_left_top)
+    plt.savefig(path1, dpi=ccfg.VISUALIZATION_DPI, bbox_inches='tight')
+    plt.close(fig1)
+
+    # 左下图：各层多变量FI柱状
+    fig2, ax2 = plt.subplots(figsize=(7.5, 5.0))
+    bars = ax2.bar(range(len(level_names)), level_multivariate_fishers,
+                   color=[plt.cm.viridis(i/len(level_names)) for i in range(len(level_names))],
+                   alpha=0.9, edgecolor='black', linewidth=1.0)
+    for i, (bar, count, val) in enumerate(zip(bars, level_neuron_counts, level_multivariate_fishers)):
+        ax2.text(bar.get_x() + bar.get_width()/2, bar.get_height() + max(level_multivariate_fishers) * 0.02,
+                 f'{val:.3f}\n(n={count})', ha='center', va='bottom', fontsize=10, fontweight='bold')
+    ax2.set_xlabel('Centrality Level')
+    ax2.set_ylabel('Multivariate Fisher Information')
+    ax2.set_title('Multivariate Fisher Information by Level')
+    ax2.set_xticks(range(len(level_names)))
+    ax2.set_xticklabels(level_names, rotation=0)
+    ax2.grid(True, axis='y', alpha=0.3)
+    ax2.spines['top'].set_visible(False)
+    ax2.spines['right'].set_visible(False)
+    plt.tight_layout()
+    path2 = os.path.join(save_dir, filename_left_bottom)
+    plt.savefig(path2, dpi=ccfg.VISUALIZATION_DPI, bbox_inches='tight')
+    plt.close(fig2)
+
+    print(f"Saved left-top panel to: {path1}")
+    print(f"Saved left-bottom panel to: {path2}")
+    return path1, path2
+
+
+def export_left_panels_pipeline(neuron_data, segments, labels, rr_neurons=None,
+                                n_levels=ccfg.N_LEVELS, save_dir=None,
+                                filename_left_top='panel_left_top.png', filename_left_bottom='panel_left_bottom.png'):
+    """
+    完整复用2×2面板的数据路径：
+    - 使用与2×2相同的网络构建(build_correlation_network)
+    - 基于度中心性分层
+    - 然后导出左上/左下两张子图
+    这样可与原2×2面板结果完全一致。
+    """
+    if save_dir is None:
+        save_dir = cfg.get_figures_dir()
+    os.makedirs(save_dir, exist_ok=True)
+
+    # 对RR神经元做同样子集处理（与分析主流程一致）
+    if rr_neurons is not None and len(rr_neurons) > 0:
+        neuron_data_subset = neuron_data[:, rr_neurons]
+        segments_subset = segments[:, rr_neurons, :]
+        labels_subset = labels
+    else:
+        neuron_data_subset = neuron_data
+        segments_subset = segments
+        labels_subset = labels
+
+    # 构建网络 -> 计算中心性（与2×2一致）
+    G, _, _ = build_correlation_network(neuron_data_subset)
+    centrality_dict = calculate_centrality_metrics(G)
+    degree_scores = centrality_dict['degree']
+
+    # 直接调用导出函数（只画左侧两图）
+    return export_left_panels(
+        segments_subset, labels_subset, degree_scores, n_levels=n_levels,
+        save_dir=save_dir, filename_left_top=filename_left_top, filename_left_bottom=filename_left_bottom
+    )
 
 def visualize_centrality_vs_information(centrality_name, level_groups, level_ranges, 
                                       fisher_scores, accuracy_scores, centrality_scores, save_path=None):

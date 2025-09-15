@@ -317,12 +317,23 @@ def load_data(data_path, start_idx=cfg.TRIAL_START_SKIP, end_idx=cfg.TRIAL_START
     # 只做基本的数据清理：移除NaN和Inf
     neuron_data = np.nan_to_num(neuron_data, nan=0.0, posinf=0.0, neginf=0.0)
     neuron_pos = data['whole_center']
-    # 检查neuron_pos维度
-    if len(neuron_pos.shape) != 2 or neuron_pos.shape[0] != 4:
-        raise ValueError(f"neuron_pos 维度有误，期望为(3, n)，实际为: {neuron_pos.shape}")
-
-    # 提取空间坐标前两维
-    neuron_pos = neuron_pos[0:2, :]
+    # 检查和处理neuron_pos维度
+    if len(neuron_pos.shape) != 2:
+        raise ValueError(f"neuron_pos 应为2D数组，实际为: {neuron_pos.shape}")
+    
+    # 灵活处理不同维度的neuron_pos
+    if neuron_pos.shape[0] == 4:
+        # 标准格式 (4, n)，提取前两维
+        neuron_pos = neuron_pos[0:2, :]
+    elif neuron_pos.shape[0] == 3:
+        # M27/M30格式 (3, n)，提取前两维  
+        neuron_pos = neuron_pos[0:2, :]
+        print(f"检测到3维neuron_pos格式，已提取前两维: {neuron_pos.shape}")
+    elif neuron_pos.shape[0] == 2:
+        # 已经是2维，直接使用
+        print(f"检测到2维neuron_pos格式: {neuron_pos.shape}")
+    else:
+        raise ValueError(f"不支持的neuron_pos维度: {neuron_pos.shape[0]}，期望为2、3或4维")
     if interactive:
         print("neuron data loaded successfully!")
         print(f"Extracted {neuron_data.shape[1]} neurons, total time steps: {neuron_data.shape[0]}")
